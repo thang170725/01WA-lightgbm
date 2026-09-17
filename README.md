@@ -22,6 +22,8 @@ Repository: [https://github.com/thang170725/lightgbm](https://github.com/thang17
 12. [Lỗi thường gặp](#12-lỗi-thường-gặp)
 
 ---
+## 0. Preview
+<img src="lightgbm.jpg" alt="preview" width=800 />
 
 ## 1. Tổng quan dự án
 
