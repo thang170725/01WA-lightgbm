@@ -5,7 +5,6 @@ backend/dataset/images
 *.py[cod]
 *$py.class
 backend/app/__pycache__
-backend/
 
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
@@ -28,6 +27,9 @@ backend/
 
 # production
 /build
+
+# model
+backend/models
 
 # misc
 .DS_Store
