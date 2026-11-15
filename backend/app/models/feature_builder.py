@@ -1,11 +1,16 @@
 import numpy as np
 import pandas as pd
 
+# [Ghi chú mới] Lớp trích xuất 11 đặc trưng đầu vào khi dự báo tương lai (Realtime / Autoregressive Feature Builder)
 class FeatureBuilder:
     def __init__(self):
         pass
 
     # ==== time features ====
+    # [Input] :
+    #   - time_str (str | pd.Timestamp): Mốc thời gian cần tạo đặc trưng (vd: "2014-12-01 08:00:00")
+    # [Output]:
+    #   - dict: Dictionary chứa 4 đặc trưng thời gian {"hour_sin", "hour_cos", "day_of_week", "is_weekend"}
     def build_time_features(
         self,
         time_str
@@ -21,6 +26,7 @@ class FeatureBuilder:
         )
 
         # cyclical encoding
+        # [Ghi chú mới] Mã hóa giờ theo hình tròn lượng giác (Sin/Cos) để giữ tính liên tục giữa 23h và 0h
         hour_sin = np.sin(
             2 * np.pi * hour / 24
         )
@@ -37,6 +43,10 @@ class FeatureBuilder:
         }
 
     # ==== lag features ====
+    # [Input] :
+    #   - history (list[float]): Danh sách giá trị tiêu thụ quá khứ đã sắp xếp theo thời gian (độ dài >= 168 giờ)
+    # [Output]:
+    #   - dict: Dictionary chứa 7 đặc trưng lịch sử (4 biến trễ lag + 3 biến thống kê trượt rolling)
     def build_lag_features(
         self,
         history
@@ -53,6 +63,7 @@ class FeatureBuilder:
             )
 
         # ===== lag =====
+        # [Ghi chú mới] Lấy giá trị tiêu thụ tại các mốc cách hiện tại 24h (1 ngày), 48h (2 ngày), 72h (3 ngày) và 168h (7 ngày)
         lag_24h = history[-24]
 
         lag_48h = history[-48]
@@ -62,6 +73,7 @@ class FeatureBuilder:
         lag_7d = history[-168]
 
         # ===== rolling =====
+        # [Ghi chú mới] Tính trung bình trượt 24h, trung bình trượt 7 ngày và độ lệch chuẩn 24h gần nhất
         rolling_mean_24h = np.mean(
             history[-24:]
         )
@@ -96,6 +108,11 @@ class FeatureBuilder:
         }
 
     # ==== build all features ====
+    # [Input] :
+    #   - time_str (str | pd.Timestamp): Mốc thời gian của bước dự đoán
+    #   - history  (list[float])       : Danh sách giá trị lịch sử tiêu thụ (>= 168 điểm)
+    # [Output]:
+    #   - features (dict)              : Dictionary tổng hợp đầy đủ 11 đặc trưng đầu vào cho mô hình
     def build_features(
         self,
         time_str,
