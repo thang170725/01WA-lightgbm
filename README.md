@@ -334,10 +334,45 @@ backend/dataset/test_ready3.csv
 
 File: `backend/app/models/lightgbm.py`
 
-| Class | Mô tả |
+| Class / Hàm | Mô tả |
 |---|---|
 | `LightGBMTrainerV2` | Train LightGBM với early stopping |
 | `LinearTrainerV2` | Train Ridge Regression (baseline) |
+| `run_training_pipeline()` | Hàm điều phối huấn luyện tuần tự cả 2 model (LightGBM & Ridge) và lưu file `.pkl` |
+
+#### Chi tiết thiết kế khung huấn luyện (`LightGBMTrainerV2` & `LinearTrainerV2`)
+
+Cả hai mô hình đều sử dụng chung tập **11 đặc trưng đầu vào (`features`)** và **biến mục tiêu (`target_value` ở thang đo `log1p`)** để đảm bảo đối sánh công bằng:
+- **4 đặc trưng thời gian**: `hour_sin`, `hour_cos` (mã hóa chu kỳ 24h), `day_of_week` (0–6), `is_weekend` (0/1).
+- **4 đặc trưng độ trễ (Lag)**: `lag_24h`, `lag_48h`, `lag_72h`, `lag_7d` (168h).
+- **3 đặc trưng thống kê trượt (Rolling)**: `rolling_mean_24h`, `rolling_mean_7d`, `rolling_std_24h`.
+
+**Bảng giải thích Input / Output các phương thức trong `LightGBMTrainerV2` và `LinearTrainerV2`:**
+
+| Phương thức | Input (Đầu vào) | Output (Đầu ra) | Giải thích chức năng |
+|---|---|---|---|
+| `__init__(train_path, valid_path, test_path)` | Đường dẫn 3 file CSV (`train_ready3.csv`, `valid_ready3.csv`, `test_ready3.csv`) | `None` | Khởi tạo cấu hình đường dẫn, danh sách 11 `features` và `target`. Kiểm tra `os.path.exists` để tránh lỗi khi chưa có dữ liệu tiền xử lý. |
+| `get_data()` | Không có (dùng thuộc tính của class) | `tuple`: `(X_train, y_train, X_valid, y_valid, X_test, y_test)` | Đọc 3 file CSV đã tiền xử lý và tách thành ma trận đặc trưng `X` $(N \times 11)$ và vector mục tiêu `y` $(N,)$. |
+| `build_model()` | Không có | `lgb.LGBMRegressor` hoặc `Ridge` | Khởi tạo mô hình với bộ siêu tham số:<br>• **LightGBM**: `n_estimators=3000`, `learning_rate=0.005`, `num_leaves=127`, `max_depth=8`, `subsample=0.8`, `colsample_bytree=0.8`, `min_child_samples=20`.<br>• **Ridge**: `alpha=1.0`, `random_state=42`. |
+| `evaluate(y_true, preds)` | `y_true`, `preds` (mảng giá trị ở thang `log1p`) | `dict`: `{"mae", "relative_mae", "mape", "rmse", "r2"}` | Đưa giá trị dự đoán và thực tế về đơn vị gốc (kWh) bằng `np.expm1()`, sau đó tính 5 chỉ số đánh giá trên tập Test. |
+| `train_model(save=False)` | `save` (`bool`) | `tuple`: `(model, evaluate)` | Điều phối quy trình train: `get_data()` $\to$ `build_model()` $\to$ `fit()` (LightGBM dùng Early Stopping 50 vòng trên tập Valid) $\to$ `predict(X_test)` $\to$ `evaluate()` $\to$ In bảng xếp hạng `feature_importances_` / `coef_`. |
+| `preprocess_input(input_dict)` | `input_dict` (`dict` chứa 11 features) | `pd.DataFrame` `(1, 11)` | Chuyển dictionary đặc trưng của 1 thời điểm thành DataFrame 1 dòng đúng thứ tự cột. |
+| `predict_new(model, input_dict)` | `model`, `input_dict` (`dict`) | `float` (giá trị kWh dự đoán) | Dự báo phụ tải cho 1 điểm thời gian mới và biến đổi ngược bằng `np.expm1()`. |
+| `forecast_future(model, history, start_time, steps)` | `model`, `history` (`list[float]` $\ge 168$ giờ), `start_time`, `steps` (`int`) | `pd.DataFrame` `["time", "prediction"]` | Dự báo cuốn chiếu (Autoregressive) cho `steps` giờ tương lai (mặc định 24h): sau mỗi bước, nối giá trị vừa dự đoán vào `history` để tính lag/rolling cho giờ kế tiếp. |
+| `predict_from_csv(model, csv_file, steps=24)` | `model`, `csv_file` (CSV 2 cột `time,value` $\ge 168$ dòng), `steps` | `pd.DataFrame` `["time", "prediction"]` | Đọc file CSV lịch sử tiêu thụ của người dùng và gọi `forecast_future()` để dự báo 24 giờ tiếp theo. |
+
+**Chạy gộp cả 2 model bằng `run_training_pipeline()`:**
+
+```python
+from app.models.lightgbm import run_training_pipeline
+
+results = run_training_pipeline(
+    train_path="backend/dataset/train_ready3.csv",
+    valid_path="backend/dataset/valid_ready3.csv",
+    test_path="backend/dataset/test_ready3.csv",
+    model_dir="backend/models",
+)
+```
 
 **Train LightGBM:**
 
@@ -385,6 +420,12 @@ backend/models/linear_v2.pkl
 
 File: `backend/app/models/model_manager.py`
 
+| Phương thức | Input | Output | Mô tả |
+|---|---|---|---|
+| `__init__(model_dir="models")` | `model_dir` (`str`) | `None` | Khởi tạo đường dẫn thư mục lưu trữ và tự động tạo thư mục nếu chưa có. |
+| `save_model(model, evaluate, save_path)` | `model` (object), `evaluate` (`dict`), `save_path` (`str`) | `None` | Đóng gói `{'model': model, 'evaluate': evaluate}` vào file `.pkl` bằng `joblib.dump`. |
+| `load_model(name)` | `name` (`str`) | `dict`: `{'model': ..., 'evaluate': ...}` | Đọc file `.pkl` từ `model_dir` và trả về mô hình kèm các chỉ số đánh giá. |
+
 ```python
 from app.models.model_manager import ModelManager
 
@@ -404,6 +445,12 @@ metrics = loaded["evaluate"]
 ### Bước 5c — Feature khi predict (`feature_builder.py`)
 
 File: `backend/app/models/feature_builder.py`
+
+| Phương thức | Input | Output | Mô tả |
+|---|---|---|---|
+| `build_time_features(time_str)` | `time_str` (`str \| Timestamp`) | `dict` (4 features) | Tính `hour_sin`, `hour_cos` (chu kỳ 24h), `day_of_week` (0–6), `is_weekend` (0/1). |
+| `build_lag_features(history)` | `history` (`list[float]` $\ge 168$ điểm) | `dict` (7 features) | Tính 4 biến trễ (`lag_24h`, `lag_48h`, `lag_72h`, `lag_7d`) và 3 biến trượt (`rolling_mean_24h`, `rolling_mean_7d`, `rolling_std_24h`). |
+| `build_features(time_str, history)` | `time_str`, `history` | `dict` (11 features) | Hợp nhất toàn bộ 11 đặc trưng để đưa vào `predict_new()`. |
 
 Dùng khi dự đoán từng giờ (không có sẵn lag trong CSV):
 
