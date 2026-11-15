@@ -1,12 +1,6 @@
 "use client";
 
-export type EvaluateMetrics = {
-    mae: number;
-    relative_mae?: number;
-    mape: number;
-    rmse: number;
-    r2: number;
-};
+import type { EvaluateMetrics } from "@/routes/UploadApi";
 
 const accentRing = [
     "ring-indigo-500/15",

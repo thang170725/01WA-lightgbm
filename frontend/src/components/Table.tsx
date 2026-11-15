@@ -1,15 +1,12 @@
 "use client";
 
-type DataPoint = {
-    time: string;
-    value: number;
-};
+import type { ForecastPoint } from "@/routes/UploadApi";
 
 function formatTime(iso: string) {
     return iso.replace("T", " ").slice(0, 19);
 }
 
-export default function Table({ data }: { data: DataPoint[] }) {
+export default function Table({ data }: { data: ForecastPoint[] }) {
     return (
         <div className="flex max-h-[min(520px,70vh)] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-[0_4px_24px_-4px_rgba(15,23,42,0.08)]">
             <div className="border-b border-slate-100 bg-linear-to-r from-slate-50 to-teal-50/40 px-5 py-4">

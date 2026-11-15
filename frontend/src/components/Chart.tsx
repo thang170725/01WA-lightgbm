@@ -10,16 +10,13 @@ import {
     YAxis,
 } from "recharts";
 
-type DataPoint = {
-    time: string;
-    value: number;
-};
+import type { ForecastPoint } from "@/routes/UploadApi";
 
 function formatHour(iso: string) {
     return iso.slice(11, 16);
 }
 
-export default function Chart({ data }: { data: DataPoint[] }) {
+export default function Chart({ data }: { data: ForecastPoint[] }) {
     const values = data.map((d) => d.value);
     const minV = Math.min(...values);
     const maxV = Math.max(...values);

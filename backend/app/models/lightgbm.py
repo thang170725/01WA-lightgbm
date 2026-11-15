@@ -260,13 +260,18 @@ class LightGBMTrainerV2:
     def __init__(self,
         train_path="dataset/train_ready3.csv",
         valid_path="dataset/valid_ready3.csv",
-        test_path="dataset/test_ready3.csv"
+        test_path="dataset/test_ready3.csv",
+        load_data=True
     ):
-        print("Loading datasets (train, valid, test)...")
+        # load_data=False: chỉ dùng để inference (API), không cần dataset train/valid/test
+        self.train = self.valid = self.test = None
 
-        self.train = pd.read_csv(train_path)
-        self.valid = pd.read_csv(valid_path)
-        self.test = pd.read_csv(test_path)
+        if load_data:
+            print("Loading datasets (train, valid, test)...")
+
+            self.train = pd.read_csv(train_path)
+            self.valid = pd.read_csv(valid_path)
+            self.test = pd.read_csv(test_path)
 
         self.features = [
             "hour_sin",
@@ -495,18 +500,21 @@ class LightGBMTrainerV2:
     # ==== predict new data ====
     def preprocess_input(
         self,
-        input_dict
+        input_dict,
+        features=None
     ):
         """
         input_dict:
             dữ liệu user nhập dạng dict
+        features:
+            danh sách feature theo thứ tự (mặc định self.features)
         """
 
         # convert -> DataFrame 1 dòng
         df = pd.DataFrame([input_dict])
 
         # đảm bảo đúng thứ tự feature
-        df = df[self.features]
+        df = df[features or self.features]
 
         return df
 
@@ -520,8 +528,10 @@ class LightGBMTrainerV2:
         predict cho 1 sample mới
         """
 
+        # dùng đúng danh sách feature mà model đã được train
         X_new = self.preprocess_input(
-            input_dict
+            input_dict,
+            features=getattr(model, "feature_name_", None)
         )
 
         preds = model.predict(X_new)
