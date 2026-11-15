@@ -15,7 +15,7 @@ def debug_df(df, name):
 print("Loading raw data...")
 
 df = pd.read_csv(
-"dataset/LD2011_2014.txt",
+r"C:\TienTho\01WA-lightgbm\backend\dataset\LD2011_2014.txt",
 sep=';',
 decimal=',',
 parse_dates=[0]
@@ -91,7 +91,7 @@ debug_df(user_df, "FINAL DATA (8 DAYS)")
 
 # ==== save ====
 
-output_path = "dataset/user_data_3.csv"
+output_path = "backend/dataset/user_data_3.csv"
 
 user_df.to_csv(output_path, index=False)
 

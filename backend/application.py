@@ -17,15 +17,15 @@ app.add_middleware(
 
 manager = ModelManager()
 lightgbm_trainer = LightGBMTrainerV2()
-linear_trainer = LinearTrainerV2()
+# linear_trainer = LinearTrainerV2()
 
 lgb_loader = manager.load_model(name="lightgbm_model_v2.pkl")
 lgb_model = lgb_loader["model"]
 lgb_evaluate = lgb_loader["evaluate"]
 
-linear_loader = manager.load_model(name="linear_v2.pkl")
-linear_model = linear_loader["model"]
-linear_evaluate = linear_loader["evaluate"]
+# linear_loader = manager.load_model(name="linear_v2.pkl")
+# linear_model = linear_loader["model"]
+# linear_evaluate = linear_loader["evaluate"]
 
 
 async def _predict_from_upload(file: UploadFile, trainer, model, evaluate: dict):
@@ -71,11 +71,11 @@ async def predict_lightgbm(file: UploadFile = File(...)):
         return {"error": str(e)}
 
 
-@app.post("/predict_linear")
-async def predict_linear(file: UploadFile = File(...)):
-    try:
-        return await _predict_from_upload(
-            file, linear_trainer, linear_model, linear_evaluate
-        )
-    except Exception as e:
-        return {"error": str(e)}
+# @app.post("/predict_linear")
+# async def predict_linear(file: UploadFile = File(...)):
+#     try:
+#         return await _predict_from_upload(
+#             file, linear_trainer, linear_model, linear_evaluate
+#         )
+#     except Exception as e:
+#         return {"error": str(e)}
