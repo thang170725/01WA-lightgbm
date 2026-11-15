@@ -1,3 +1,14 @@
+import os
+import sys
+
+# Tránh xung đột tên file 'lightgbm.py' với thư viện cài đặt 'lightgbm' khi chạy trực tiếp bằng lệnh python backend/app/models/lightgbm.py
+_current_dir = os.path.abspath(os.path.dirname(__file__))
+if _current_dir in [os.path.abspath(p) for p in sys.path]:
+    sys.path = [p for p in sys.path if os.path.abspath(p) != _current_dir]
+
+# Đảm bảo import được package 'app' dù chạy từ thư mục gốc dự án hay từ thư mục 'backend/'
+sys.path.insert(0, os.path.abspath(os.path.join(_current_dir, "../..")))
+
 import numpy as np
 import pandas as pd
 import lightgbm as lgb
@@ -8,33 +19,78 @@ from sklearn.metrics import (
     mean_squared_error,
     r2_score
 )
+
 from app.models.feature_builder import FeatureBuilder
 from app.models.model_manager import ModelManager
 from sklearn.linear_model import LinearRegression, Ridge
 
+
+def _resolve_csv_path(path: str) -> str:
+    # Input : path (str) - Đường dẫn file CSV truyền vào (vd: "dataset/train_ready3.csv" hoặc "backend/dataset/train_ready3.csv")
+    # Output: str - Đường dẫn thực tế tồn tại trên hệ thống tệp
+    if os.path.exists(path):
+        return path
+    alt_with_backend = os.path.join("backend", path)
+    if os.path.exists(alt_with_backend):
+        return alt_with_backend
+    if path.startswith("backend/") or path.startswith("backend\\"):
+        alt_without_backend = path[len("backend/"):]
+        if os.path.exists(alt_without_backend):
+            return alt_without_backend
+    return path
+
+
+LAG_AND_ROLLING_COLS = [
+    "lag_24h", "lag_48h", "lag_72h", "lag_7d",
+    "rolling_mean_24h", "rolling_mean_7d", "rolling_std_24h"
+]
+
+
+def _sync_log1p_features(df: pd.DataFrame) -> pd.DataFrame:
+    # Input : df (pd.DataFrame) - Bảng dữ liệu Train / Valid / Test đọc từ file CSV
+    # Output: pd.DataFrame - Bảng dữ liệu đã được đồng bộ biến đổi np.log1p cho 7 cột lag & rolling (khớp với FeatureBuilder khi dự báo trên Web)
+    df = df.copy()
+    if "lag_24h" in df.columns and df["lag_24h"].max() > 25.0:
+        for col in LAG_AND_ROLLING_COLS:
+            if col in df.columns:
+                df[col] = np.log1p(df[col].clip(lower=0)).astype("float32")
+    return df
+
+
 # ==== model ai/ml lightgbm ====
+# Lớp huấn luyện và dự báo phụ tải điện bằng mô hình LightGBM (Phiên bản 1)
 class LightGBMTrainer:
     def __init__(self,
-        train_path="dataset/train_ready3.csv",
-        valid_path="dataset/valid_ready3.csv",
-        test_path="dataset/test_ready3.csv"
+        train_path="dataset/train_ready3.csv",  # Input 1: đường dẫn file CSV tập huấn luyện (Train)
+        valid_path="dataset/valid_ready3.csv",  # Input 2: đường dẫn file CSV tập kiểm định (Valid)
+        test_path="dataset/test_ready3.csv"     # Input 3: đường dẫn file CSV tập kiểm tra (Test)
     ):
+        # Input :
+        #   - train_path (str): Đường dẫn tới file CSV tập Train
+        #   - valid_path (str): Đường dẫn tới file CSV tập Valid
+        #   - test_path  (str): Đường dẫn tới file CSV tập Test
+        # Output:
+        #   - None: Khởi tạo các DataFrame (train, valid, test), danh sách 11 features và cột target
         print("Loading datasets (train, valid, test)...")
 
-        self.train = pd.read_csv(train_path)
-        self.valid = pd.read_csv(valid_path)
-        self.test = pd.read_csv(test_path)
+        self.train = _sync_log1p_features(pd.read_csv(_resolve_csv_path(train_path)))
+        self.valid = _sync_log1p_features(pd.read_csv(_resolve_csv_path(valid_path)))
+        self.test = _sync_log1p_features(pd.read_csv(_resolve_csv_path(test_path)))
 
         # LightGBMTrainer
+        # Danh sách 11 cột đặc trưng đầu vào (4 đặc trưng thời gian + 4 độ trễ lag + 3 thống kê trượt rolling)
         self.features = [
             "hour_sin", "hour_cos", "day_of_week", "is_weekend",
             "lag_24h", "lag_48h", "lag_72h", "lag_7d",
             "rolling_mean_24h", "rolling_mean_7d", "rolling_std_24h"
         ]
-        self.target = "target_value"
+        self.target = "target_value"  # Cột giá trị mục tiêu cần dự đoán (đang ở thang đo log1p)
 
     # data
     def get_data(self):
+        # Input : Không có tham số truyền vào (sử dụng self.train, self.valid, self.test, self.features, self.target)
+        # Output: Tuple 6 phần tử (X_train, y_train, X_valid, y_valid, X_test, y_test)
+        #         trong đó X_* là DataFrame (N, 11) chứa đặc trưng, y_* là Series (N,) chứa nhãn mục tiêu
         print("\nPreparing data...")
 
         steps = ["Train", "Valid", "Test"]
@@ -62,19 +118,8 @@ class LightGBMTrainer:
 
     # model
     def build_model(self):
-        # version 1
-        # model = lgb.LGBMRegressor(
-        #     objective="regression",
-        #     n_estimators=300,
-        #     learning_rate=0.05,
-        #     num_leaves=31,
-        #     subsample=0.8,
-        #     colsample_bytree=0.8,
-        #     random_state=42,
-        #     n_jobs=-1,
-        #     verbosity=-1
-        # )
-
+        # Input : Không có tham số truyền vào
+        # Output: model (lgb.LGBMRegressor) - Đối tượng mô hình LightGBM đã cấu hình hyperparameters
         # === version 2 ===
         model = lgb.LGBMRegressor(
             objective="regression",
@@ -93,12 +138,17 @@ class LightGBMTrainer:
 
     # metrics
     def evaluate(self,
-        y_true,
-        preds
+        y_true,  # Input 1: mảng/Series giá trị thực tế trên tập Test (thang log1p)
+        preds    # Input 2: mảng/Series giá trị mô hình dự đoán trên tập Test (thang log1p)
     ):
+        # Input :
+        #   - y_true (np.ndarray | pd.Series): Nhãn thực tế ở thang log1p
+        #   - preds  (np.ndarray | pd.Series): Nhãn dự đoán ở thang log1p
+        # Output:
+        #   - dict: Từ điển gồm 5 chỉ số đánh giá {"mae", "relative_mae", "mape", "rmse", "r2"} ở đơn vị gốc (kWh)
         # inverse log1p
-        y_true = np.expm1(y_true)
-        preds = np.expm1(preds)
+        y_true = np.expm1(y_true)  # Chuyển ngược từ log(1+y) về giá trị thực tế kWh
+        preds = np.expm1(preds)    # Chuyển ngược giá trị dự đoán về kWh
 
         mae = mean_absolute_error(y_true, preds)
         relative_mae = (
@@ -136,6 +186,10 @@ class LightGBMTrainer:
 
     # train
     def train_model(self):
+        # Input : Không có tham số truyền vào
+        # Output: Tuple (model, evaluate) gồm:
+        #   - model (lgb.LGBMRegressor): Mô hình LightGBM đã huấn luyện tại best_iteration_
+        #   - evaluate (dict)          : Dictionary chứa 5 chỉ số đánh giá trên tập Test
         (
             X_train,
             y_train,
@@ -197,6 +251,8 @@ class LightGBMTrainer:
             "rolling_mean_24h": 125
         }
         """
+        # Input : input_dict (dict) - Từ điển chứa 11 đặc trưng của 1 mốc thời gian
+        # Output: df (pd.DataFrame) - DataFrame 1 dòng, 11 cột sắp xếp đúng thứ tự self.features
 
         # convert -> DataFrame 1 dòng
         df = pd.DataFrame([input_dict])
@@ -211,6 +267,11 @@ class LightGBMTrainer:
         """
         predict cho 1 sample mới
         """
+        # Input :
+        #   - model (lgb.LGBMRegressor): Mô hình đã huấn luyện
+        #   - input_dict (dict)        : Từ điển chứa 11 đặc trưng của thời điểm cần dự đoán
+        # Output:
+        #   - preds[0] (float)         : Giá trị điện năng dự báo (kWh) sau khi biến đổi ngược np.expm1
 
         X_new = self.preprocess_input(input_dict)
 
@@ -227,6 +288,13 @@ class LightGBMTrainer:
         start_time: thời điểm bắt đầu dự đoán
         steps: số bước tương lai (vd: 24 giờ)
         """
+        # Input :
+        #   - model (lgb.LGBMRegressor)     : Mô hình đã huấn luyện
+        #   - history (list[float])         : Danh sách giá trị tiêu thụ lịch sử (>= 168 giờ)
+        #   - start_time (str | pd.Timestamp): Mốc thời gian bắt đầu dự đoán
+        #   - steps (int)                   : Số giờ tương lai cần dự báo (vd: 24)
+        # Output:
+        #   - pd.DataFrame                  : Bảng kết quả gồm 2 cột ["time", "prediction"] với `steps` dòng
 
         results = []
         history = history.copy()
@@ -256,38 +324,50 @@ class LightGBMTrainer:
         return pd.DataFrame(results)
 
 # ==== LIGHTGBM TRAINER ====
+# Lớp huấn luyện & dự báo chính cho MÔ HÌNH 1: LightGBM Regressor (Version 2)
 class LightGBMTrainerV2:
     def __init__(self,
-        train_path="dataset/train_ready3.csv",
-        valid_path="dataset/valid_ready3.csv",
-        test_path="dataset/test_ready3.csv"
+        train_path="dataset/train_ready3.csv",  # Input 1: đường dẫn file CSV tập Train
+        valid_path="dataset/valid_ready3.csv",  # Input 2: đường dẫn file CSV tập Valid
+        test_path="dataset/test_ready3.csv"     # Input 3: đường dẫn file CSV tập Test
     ):
+        # Input :
+        #   - train_path (str): Đường dẫn file CSV tập huấn luyện (mặc định "dataset/train_ready3.csv")
+        #   - valid_path (str): Đường dẫn file CSV tập kiểm định (mặc định "dataset/valid_ready3.csv")
+        #   - test_path  (str): Đường dẫn file CSV tập kiểm tra (mặc định "dataset/test_ready3.csv")
+        # Output:
+        #   - None: Khởi tạo đối tượng LightGBMTrainerV2, đọc 3 tập dữ liệu và cấu hình 11 features + target
         print("Loading datasets (train, valid, test)...")
 
-        self.train = pd.read_csv(train_path)
-        self.valid = pd.read_csv(valid_path)
-        self.test = pd.read_csv(test_path)
+        self.train = _sync_log1p_features(pd.read_csv(_resolve_csv_path(train_path)))
+        self.valid = _sync_log1p_features(pd.read_csv(_resolve_csv_path(valid_path)))
+        self.test = _sync_log1p_features(pd.read_csv(_resolve_csv_path(test_path)))
 
+        # Danh sách 11 cột đặc trưng đầu vào dùng để huấn luyện và dự báo
         self.features = [
-            "hour_sin",
-            "hour_cos",
-            "day_of_week",
-            "is_weekend",
+            "hour_sin",         # Thành phần sin của giờ trong ngày (chu kỳ 24h)
+            "hour_cos",         # Thành phần cos của giờ trong ngày (chu kỳ 24h)
+            "day_of_week",      # Thứ trong tuần (0: Thứ 2 -> 6: Chủ Nhật)
+            "is_weekend",       # Cờ đánh dấu cuối tuần (1: Thứ 7/CN, 0: Ngày thường)
 
-            "lag_24h",
-            "lag_48h",
-            "lag_72h",
-            "lag_7d",
+            "lag_24h",          # Độ trễ 24 giờ (1 ngày trước cùng giờ)
+            "lag_48h",          # Độ trễ 48 giờ (2 ngày trước cùng giờ)
+            "lag_72h",          # Độ trễ 72 giờ (3 ngày trước cùng giờ)
+            "lag_7d",           # Độ trễ 168 giờ (7 ngày trước cùng giờ)
 
-            "rolling_mean_24h",
-            "rolling_mean_7d",
-            "rolling_std_24h"
+            "rolling_mean_24h", # Trung bình trượt 24 giờ gần nhất
+            "rolling_mean_7d",  # Trung bình trượt 7 ngày (168 giờ) gần nhất
+            "rolling_std_24h"   # Độ lệch chuẩn trượt 24 giờ gần nhất
         ]
 
-        self.target = "target_value"
+        self.target = "target_value"  # Cột mục tiêu dự đoán (ở thang đo log1p)
 
     # ==== data ====
     def get_data(self):
+        # Input : Không có tham số truyền vào (sử dụng self.train, self.valid, self.test)
+        # Output: Tuple 6 phần tử (X_train, y_train, X_valid, y_valid, X_test, y_test)
+        #         - X_train, X_valid, X_test (pd.DataFrame): Ma trận đặc trưng 11 cột của 3 tập
+        #         - y_train, y_valid, y_test (pd.Series)   : Vector giá trị mục tiêu của 3 tập
         print("\nPreparing data...")
 
         steps = ["Train", "Valid", "Test"]
@@ -337,19 +417,21 @@ class LightGBMTrainerV2:
 
     # ==== model ====
     def build_model(self):
+        # Input : Không có tham số truyền vào
+        # Output: model (lgb.LGBMRegressor) - Mô hình LightGBM Regressor đã thiết lập bộ siêu tham số
         # === version 2 ===
         model = lgb.LGBMRegressor(
-            objective="regression",
-            n_estimators=3000,
-            learning_rate=0.005,
-            num_leaves=127,
-            max_depth=8,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            min_child_samples=20,
-            random_state=42,
-            n_jobs=-1,
-            verbosity=-1
+            objective="regression",     # Bài toán hồi quy (tối ưu L2 loss)
+            n_estimators=3000,          # Số lượng cây tối đa
+            learning_rate=0.005,        # Tốc độ học nhỏ kết hợp early stopping
+            num_leaves=127,             # Số nút lá tối đa trên 1 cây
+            max_depth=8,                # Độ sâu tối đa của cây quyết định
+            subsample=0.8,              # Tỷ lệ lấy mẫu dữ liệu cho mỗi cây
+            colsample_bytree=0.8,       # Tỷ lệ lấy mẫu đặc trưng cho mỗi cây
+            min_child_samples=20,       # Số mẫu tối thiểu trên 1 lá
+            random_state=42,            # Cố định seed để tái lập kết quả
+            n_jobs=-1,                  # Sử dụng toàn bộ nhân CPU
+            verbosity=-1                # Ẩn cảnh báo nội bộ của LightGBM
         )
 
         return model
@@ -357,26 +439,31 @@ class LightGBMTrainerV2:
     # ==== metrics ====
     def evaluate(
         self,
-        y_true,
-        preds
+        y_true,  # Input 1: giá trị thực tế trên tập Test (thang log1p)
+        preds    # Input 2: giá trị dự đoán của mô hình trên tập Test (thang log1p)
     ):
+        # Input :
+        #   - y_true (np.ndarray | pd.Series): Nhãn thực tế trên tập Test (ở thang đo log1p)
+        #   - preds  (np.ndarray | pd.Series): Nhãn dự báo trên tập Test (ở thang đo log1p)
+        # Output:
+        #   - dict: Dictionary chứa 5 chỉ số đánh giá kiểu float {"mae", "relative_mae", "mape", "rmse", "r2"}
         # inverse log1p
-        y_true = np.expm1(y_true)
+        y_true = np.expm1(y_true)  # Đưa nhãn thực tế từ thang log1p về đơn vị kWh gốc
 
-        preds = np.expm1(preds)
+        preds = np.expm1(preds)    # Đưa giá trị dự đoán từ thang log1p về đơn vị kWh gốc
 
-        mae = mean_absolute_error(y_true, preds)
+        mae = mean_absolute_error(y_true, preds)  # Sai số tuyệt đối trung bình (kWh)
 
         relative_mae = (
             mae / np.mean(y_true)
-        ) * 100
+        ) * 100                                   # Tỷ lệ MAE so với mức tiêu thụ trung bình (%)
 
         rmse = np.sqrt(
             mean_squared_error(
                 y_true,
                 preds
             )
-        )
+        )                                         # Căn bậc hai sai số toàn phương trung bình (kWh)
 
         mape = np.mean(
             np.abs(
@@ -384,12 +471,12 @@ class LightGBMTrainerV2:
                     y_true - preds
                 ) / y_true
             )
-        ) * 100
+        ) * 100                                   # Sai số phần trăm tuyệt đối trung bình (%)
 
         r2 = r2_score(
             y_true,
             preds
-        )
+        )                                         # Hệ số xác định R2 (độ phù hợp của mô hình)
 
         # ===== debug =====
         print(f"MAE: {mae:.4f}")
@@ -408,8 +495,14 @@ class LightGBMTrainerV2:
 
     # ==== train ====
     def train_model(self,
-        save: bool = False
+        save: bool = False  # Input: cờ tùy chọn có lưu thêm bản raw model hay không (mặc định False)
     ):
+        # Input :
+        #   - save (bool): Cờ tùy chọn lưu model (mặc định False)
+        # Output:
+        #   - Tuple (model, evaluate):
+        #       + model (lgb.LGBMRegressor): Đối tượng mô hình LightGBM đã huấn luyện xong
+        #       + evaluate (dict)          : Dictionary chứa 5 chỉ số đánh giá trên tập Test
         (
             X_train,
             y_train,
@@ -481,13 +574,15 @@ class LightGBMTrainerV2:
         )
 
         # ==== save model ====
+        save_dir = "backend/models" if os.path.exists("backend") else "models"
+        os.makedirs(save_dir, exist_ok=True)
         joblib.dump(
             model,
-            "backend/models/lightgbm_v2.pkl"
+            os.path.join(save_dir, "lightgbm_v2.pkl")
         )
 
         print(
-            "\nModel saved: backend/models/lightgbm_v2.pkl"
+            f"\nModel saved: {os.path.join(save_dir, 'lightgbm_v2.pkl')}"
         )
 
         return model, evaluate
@@ -495,12 +590,14 @@ class LightGBMTrainerV2:
     # ==== predict new data ====
     def preprocess_input(
         self,
-        input_dict
+        input_dict  # Input: dictionary chứa 11 đặc trưng của 1 mốc thời gian
     ):
         """
         input_dict:
             dữ liệu user nhập dạng dict
         """
+        # Input : input_dict (dict) - Dictionary chứa 11 đặc trưng của thời điểm cần dự đoán
+        # Output: df (pd.DataFrame) - DataFrame kích thước (1, 11) đúng thứ tự cột self.features
 
         # convert -> DataFrame 1 dòng
         df = pd.DataFrame([input_dict])
@@ -513,12 +610,17 @@ class LightGBMTrainerV2:
     # ==== predict 1 sample ====
     def predict_new(
         self,
-        model,
-        input_dict
+        model,       # Input 1: mô hình LightGBM đã huấn luyện
+        input_dict   # Input 2: dictionary chứa 11 đặc trưng đầu vào của 1 thời điểm
     ):
         """
         predict cho 1 sample mới
         """
+        # Input :
+        #   - model (lgb.LGBMRegressor): Mô hình LightGBM đã train
+        #   - input_dict (dict)        : 11 đặc trưng đầu vào của điểm thời gian cần dự đoán
+        # Output:
+        #   - preds[0] (float)         : Giá trị tiêu thụ điện dự đoán (kWh) sau khi biến đổi ngược np.expm1
 
         X_new = self.preprocess_input(
             input_dict
@@ -534,10 +636,10 @@ class LightGBMTrainerV2:
     # ==== forecast future ====
     def forecast_future(
         self,
-        model,
-        history,
-        start_time,
-        steps
+        model,       # Input 1: mô hình LightGBM đã huấn luyện
+        history,     # Input 2: danh sách giá trị quá khứ (>= 168 giờ)
+        start_time,  # Input 3: thời điểm bắt đầu dự đoán
+        steps        # Input 4: số bước (số giờ) cần dự báo trong tương lai (vd: 24)
     ):
         """
         history:
@@ -550,6 +652,13 @@ class LightGBMTrainerV2:
             số bước tương lai
             vd: 24 giờ
         """
+        # Input :
+        #   - model (lgb.LGBMRegressor)     : Mô hình LightGBM đã train
+        #   - history (list[float])         : Chuỗi giá trị lịch sử tiêu thụ (>= 168 điểm)
+        #   - start_time (str | pd.Timestamp): Thời điểm bắt đầu dự báo
+        #   - steps (int)                   : Số giờ tương lai cần dự báo (vd: 24 giờ)
+        # Output:
+        #   - pd.DataFrame                  : DataFrame gồm `steps` dòng và 2 cột ["time", "prediction"]
 
         results = []
 
@@ -590,9 +699,9 @@ class LightGBMTrainerV2:
     # ==== predict từ file csv mới ====
     def predict_from_csv(
         self,
-        model,
-        csv_file,
-        steps=24
+        model,      # Input 1: mô hình LightGBM đã huấn luyện
+        csv_file,   # Input 2: đường dẫn hoặc file-like CSV có 2 cột 'time', 'value' (>= 168 dòng)
+        steps=24    # Input 3: số giờ tương lai cần dự đoán (mặc định 24 giờ)
     ):
         """
         csv_file:
@@ -602,6 +711,12 @@ class LightGBMTrainerV2:
             2024-01-01 00:00:00,100
             2024-01-01 01:00:00,120
         """
+        # Input :
+        #   - model (lgb.LGBMRegressor): Mô hình LightGBM đã train
+        #   - csv_file (str | file)    : File CSV lịch sử của người dùng (cột time, value)
+        #   - steps (int)              : Số bước thời gian (giờ) cần dự báo (mặc định 24)
+        # Output:
+        #   - forecast_df (pd.DataFrame): Bảng kết quả dự báo gồm 2 cột ["time", "prediction"]
 
         df = pd.read_csv(
             csv_file,
@@ -633,19 +748,29 @@ class LightGBMTrainerV2:
 
         return forecast_df
 
+
+# ==== LINEAR / RIDGE TRAINER ====
+# Lớp huấn luyện & dự báo cho MÔ HÌNH 2: Ridge Regression (Version 2 - dùng làm Baseline đối sánh)
 class LinearTrainerV2:
     def __init__(
         self,
-        train_path="dataset/train_ready3.csv",
-        valid_path="dataset/valid_ready3.csv",
-        test_path="dataset/test_ready3.csv"
+        train_path="dataset/train_ready3.csv",  # Input 1: đường dẫn file CSV tập Train
+        valid_path="dataset/valid_ready3.csv",  # Input 2: đường dẫn file CSV tập Valid
+        test_path="dataset/test_ready3.csv"     # Input 3: đường dẫn file CSV tập Test
     ):
+        # Input :
+        #   - train_path (str): Đường dẫn file CSV tập huấn luyện (mặc định "dataset/train_ready3.csv")
+        #   - valid_path (str): Đường dẫn file CSV tập kiểm định (mặc định "dataset/valid_ready3.csv")
+        #   - test_path  (str): Đường dẫn file CSV tập kiểm tra (mặc định "dataset/test_ready3.csv")
+        # Output:
+        #   - None: Khởi tạo đối tượng LinearTrainerV2 với cùng bộ 11 features và target như LightGBM
         print("Loading datasets (train, valid, test)...")
 
-        self.train = pd.read_csv(train_path)
-        self.valid = pd.read_csv(valid_path)
-        self.test = pd.read_csv(test_path)
+        self.train = _sync_log1p_features(pd.read_csv(_resolve_csv_path(train_path)))
+        self.valid = _sync_log1p_features(pd.read_csv(_resolve_csv_path(valid_path)))
+        self.test = _sync_log1p_features(pd.read_csv(_resolve_csv_path(test_path)))
 
+        # Sử dụng chung 11 đặc trưng đầu vào với LightGBM để đối sánh kết quả công bằng
         self.features = [
             "hour_sin",
             "hour_cos",
@@ -668,6 +793,10 @@ class LinearTrainerV2:
     # DATA
     # ==================================================
     def get_data(self):
+        # Input : Không có tham số truyền vào
+        # Output: Tuple 6 phần tử (X_train, y_train, X_valid, y_valid, X_test, y_test)
+        #         - X_train, X_valid, X_test (pd.DataFrame): Ma trận 11 đặc trưng của 3 tập
+        #         - y_train, y_valid, y_test (pd.Series)   : Vector nhãn mục tiêu (target_value) của 3 tập
         print("\nPreparing data...")
 
         steps = ["Train", "Valid", "Test"]
@@ -720,14 +849,9 @@ class LinearTrainerV2:
     # ==================================================
     # MODEL
     # ==================================================
-    # def build_model(self):
-    #     model = LinearRegression(
-    #         fit_intercept=True,
-    #         n_jobs=-1
-    #     )
-
-    #     return model
     def build_model(self):
+        # Input : Không có tham số truyền vào
+        # Output: model (sklearn.linear_model.Ridge) - Mô hình hồi quy tuyến tính có điều chuẩn L2 (alpha=1.0)
         return Ridge(
             alpha=1.0,
             random_state=42
@@ -738,11 +862,16 @@ class LinearTrainerV2:
     # ==================================================
     def evaluate(
         self,
-        y_true,
-        preds
+        y_true,  # Input 1: mảng/Series giá trị thực tế trên tập Test (thang log1p)
+        preds    # Input 2: mảng/Series giá trị dự đoán của mô hình Ridge (thang log1p)
     ):
-        y_true = np.expm1(y_true)
-        preds = np.expm1(preds)
+        # Input :
+        #   - y_true (np.ndarray | pd.Series): Giá trị thực tế của tập Test (ở thang đo log1p)
+        #   - preds  (np.ndarray | pd.Series): Giá trị dự đoán của mô hình Ridge (ở thang đo log1p)
+        # Output:
+        #   - dict: Dictionary chứa 5 chỉ số đánh giá kiểu float {"mae", "relative_mae", "mape", "rmse", "r2"}
+        y_true = np.expm1(y_true)  # Đưa nhãn thực tế về đơn vị gốc (kWh)
+        preds = np.expm1(preds)    # Đưa giá trị dự đoán về đơn vị gốc (kWh)
 
         mae = mean_absolute_error(
             y_true,
@@ -792,8 +921,14 @@ class LinearTrainerV2:
     # ==================================================
     def train_model(
         self,
-        save: bool = False
+        save: bool = False  # Input: cờ tùy chọn có lưu trực tiếp model bằng joblib hay không
     ):
+        # Input :
+        #   - save (bool): Tùy chọn lưu file .pkl trực tiếp trong hàm (mặc định False)
+        # Output:
+        #   - Tuple (model, evaluate):
+        #       + model (Ridge)  : Mô hình Ridge Regression đã huấn luyện xong
+        #       + evaluate (dict): Dictionary chứa 5 chỉ số đánh giá trên tập Test
         (
             X_train,
             y_train,
@@ -863,13 +998,15 @@ class LinearTrainerV2:
         )
 
         if save:
+            save_dir = "backend/models" if os.path.exists("backend") else "models"
+            os.makedirs(save_dir, exist_ok=True)
             joblib.dump(
                 model,
-                "backend/models/linear_v2.pkl"
+                os.path.join(save_dir, "linear_v2.pkl")
             )
 
             print(
-                "\nModel saved: backend/models/linear_v2.pkl"
+                f"\nModel saved: {os.path.join(save_dir, 'linear_v2.pkl')}"
             )
 
         return model, evaluate
@@ -879,8 +1016,10 @@ class LinearTrainerV2:
     # ==================================================
     def preprocess_input(
         self,
-        input_dict
+        input_dict  # Input: dictionary chứa 11 đặc trưng của 1 mốc thời gian
     ):
+        # Input : input_dict (dict) - Dictionary chứa 11 đặc trưng của thời điểm cần dự đoán
+        # Output: df (pd.DataFrame) - DataFrame 1 dòng, 11 cột đúng thứ tự self.features
         df = pd.DataFrame(
             [input_dict]
         )
@@ -894,9 +1033,14 @@ class LinearTrainerV2:
     # ==================================================
     def predict_new(
         self,
-        model,
-        input_dict
+        model,       # Input 1: mô hình Ridge đã huấn luyện
+        input_dict   # Input 2: dictionary chứa 11 đặc trưng của 1 thời điểm
     ):
+        # Input :
+        #   - model (Ridge)    : Mô hình Ridge đã train
+        #   - input_dict (dict): 11 đặc trưng của 1 bước thời gian
+        # Output:
+        #   - preds[0] (float) : Giá trị tiêu thụ điện dự đoán (kWh) sau khi biến đổi ngược np.expm1
         X_new = self.preprocess_input(
             input_dict
         )
@@ -916,11 +1060,18 @@ class LinearTrainerV2:
     # ==================================================
     def forecast_future(
         self,
-        model,
-        history,
-        start_time,
-        steps
+        model,       # Input 1: mô hình Ridge đã huấn luyện
+        history,     # Input 2: danh sách giá trị quá khứ (>= 168 giờ)
+        start_time,  # Input 3: mốc thời gian bắt đầu dự đoán
+        steps        # Input 4: số bước tương lai cần dự báo (vd: 24 giờ)
     ):
+        # Input :
+        #   - model (Ridge)                 : Mô hình Ridge đã train
+        #   - history (list[float])         : Chuỗi giá trị lịch sử tiêu thụ (>= 168 giờ)
+        #   - start_time (str | pd.Timestamp): Mốc thời gian bắt đầu dự báo
+        #   - steps (int)                   : Số giờ tương lai cần dự báo (vd: 24 giờ)
+        # Output:
+        #   - pd.DataFrame                  : Bảng kết quả dự báo gồm 2 cột ["time", "prediction"]
         results = []
 
         history = history.copy()
@@ -965,10 +1116,16 @@ class LinearTrainerV2:
     # ==================================================
     def predict_from_csv(
         self,
-        model,
-        csv_file,
-        steps=24
+        model,      # Input 1: mô hình Ridge đã huấn luyện
+        csv_file,   # Input 2: đường dẫn hoặc đối tượng file CSV đầu vào ('time', 'value')
+        steps=24    # Input 3: số giờ tương lai cần dự báo (mặc định 24)
     ):
+        # Input :
+        #   - model (Ridge)            : Mô hình Ridge đã train
+        #   - csv_file (str | file)    : File CSV lịch sử của người dùng (cột time, value)
+        #   - steps (int)              : Số bước thời gian (giờ) cần dự báo (mặc định 24)
+        # Output:
+        #   - forecast_df (pd.DataFrame): Bảng kết quả dự báo gồm 2 cột ["time", "prediction"]
         df = pd.read_csv(
             csv_file,
             parse_dates=["time"]
@@ -1004,8 +1161,11 @@ class LinearTrainerV2:
 
         return forecast_df
 
+
 if __name__ == "__main__":
-    # ===== train model version 2 =====
+    # ===== train model version 2 (Mô hình 1: LightGBM Regressor) =====
+    # Input : 3 file CSV đã tiền xử lý (train_ready3.csv, valid_ready3.csv, test_ready3.csv)
+    # Output: File model "backend/models/lightgbm_model_v2.pkl" chứa {'model': lgb_model, 'evaluate': lgb_evaluate}
     model = LightGBMTrainerV2(
         train_path="backend/dataset/train_ready3.csv",
         valid_path="backend/dataset/valid_ready3.csv",
@@ -1017,14 +1177,16 @@ if __name__ == "__main__":
     loader = model_manager.load_model(name='lightgbm_model_v2.pkl')
     print(loader)
 
-    # ===== train model linear version 2 =====
-    # model = LinearTrainerV2(
-    #     train_path="backend/dataset/train_ready3.csv",
-    #     valid_path="backend/dataset/valid_ready3.csv",
-    #     test_path="backend/dataset/test_ready3.csv"
-    # )
-    # model, evaluate = model.train_model(save=False)
-    # model_manager = ModelManager(model_dir="backend/models")
-    # save = model_manager.save_model(model, evaluate, save_path="linear_v2.pkl")
-    # loader = model_manager.load_model(name='linear_v2.pkl')
-    # print(loader)
+    # ===== train model linear version 2 (Mô hình 2: Ridge Regression) =====
+    # Input : 3 file CSV đã tiền xử lý (train_ready3.csv, valid_ready3.csv, test_ready3.csv)
+    # Output: File model "backend/models/linear_v2.pkl" chứa {'model': linear_model, 'evaluate': linear_evaluate}
+    linear_trainer = LinearTrainerV2(
+        train_path="backend/dataset/train_ready3.csv",
+        valid_path="backend/dataset/valid_ready3.csv",
+        test_path="backend/dataset/test_ready3.csv"
+    )
+    linear_model, linear_evaluate = linear_trainer.train_model(save=False)
+    model_manager = ModelManager(model_dir="backend/models")
+    save_linear = model_manager.save_model(linear_model, linear_evaluate, save_path="linear_v2.pkl")
+    loader_linear = model_manager.load_model(name='linear_v2.pkl')
+    print(loader_linear)
