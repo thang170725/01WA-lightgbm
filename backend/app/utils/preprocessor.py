@@ -210,21 +210,21 @@ class Preprocessor:
     @staticmethod
     def load_train_data():
         return pd.read_csv(
-            "backend/dataset/train_ready.csv",
+            "backend/dataset/train_ready3.csv",
             parse_dates=["timestamp"]
         )
 
     @staticmethod
     def load_valid_data():
         return pd.read_csv(
-            "backend/dataset/valid_ready.csv",
+            "backend/dataset/valid_ready3.csv",
             parse_dates=["timestamp"]
         )
 
     @staticmethod
     def load_test_data():
         return pd.read_csv(
-            "backend/dataset/test_ready.csv",
+            "backend/dataset/test_ready3.csv",
             parse_dates=["timestamp"]
         )
 
@@ -477,11 +477,11 @@ if __name__ == "__main__":
     df_scale = preprocessor.transform_target(df_build_lag)
     print(df_scale.head())
     preprocessor.split_data(df_scale)
-    # preprocessor.run_pipeline()
+    preprocessor.run_pipeline()
 
     # === checker version 2 ====
-    # checker = CheckerVersion2(dataset_path="backend/dataset/train_ready.csv")
-    # checker.overview()
+    checker = CheckerVersion2(dataset_path="backend/dataset/train_ready3.csv")
+    checker.overview()
 
     # import pandas as pd
     # import numpy as np

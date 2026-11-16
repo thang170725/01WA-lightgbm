@@ -312,3 +312,6 @@ if __name__ == "__main__":
         )
     )
     checker.analyze_monthly_consumption(df=cleaned_df)
+
+    c = DataCheckerTXT()
+    c.run_all()

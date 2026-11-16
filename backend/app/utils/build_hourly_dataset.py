@@ -88,5 +88,5 @@ if __name__ == "__main__":
         top_clients=180,
         min_mean_load=3.0,
         keep_year="2014",
-        save=False
+        save=True
     )

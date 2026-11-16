@@ -1006,25 +1006,25 @@ class LinearTrainerV2:
 
 if __name__ == "__main__":
     # ===== train model version 2 =====
-    # model = LightGBMTrainerV2(
-    #     train_path="backend/dataset/train_ready3.csv",
-    #     valid_path="backend/dataset/valid_ready3.csv",
-    #     test_path="backend/dataset/test_ready3.csv"
-    # )
-    # model, evaluate = model.train_model()
-    # model_manager = ModelManager(model_dir="backend/models")
-    # save = model_manager.save_model(model, evaluate, save_path="lightgbm_model_v2.pkl")
-    # loader = model_manager.load_model(name='lightgbm_model_v2.pkl')
-    # print(loader)
-
-    # ===== train model linear version 2 =====
-    model = LinearTrainerV2(
+    model = LightGBMTrainerV2(
         train_path="backend/dataset/train_ready3.csv",
         valid_path="backend/dataset/valid_ready3.csv",
         test_path="backend/dataset/test_ready3.csv"
     )
-    model, evaluate = model.train_model(save=False)
+    model, evaluate = model.train_model()
     model_manager = ModelManager(model_dir="backend/models")
-    save = model_manager.save_model(model, evaluate, save_path="linear_v2.pkl")
-    loader = model_manager.load_model(name='linear_v2.pkl')
+    save = model_manager.save_model(model, evaluate, save_path="lightgbm_model_v2.pkl")
+    loader = model_manager.load_model(name='lightgbm_model_v2.pkl')
     print(loader)
+
+    # ===== train model linear version 2 =====
+    # model = LinearTrainerV2(
+    #     train_path="backend/dataset/train_ready3.csv",
+    #     valid_path="backend/dataset/valid_ready3.csv",
+    #     test_path="backend/dataset/test_ready3.csv"
+    # )
+    # model, evaluate = model.train_model(save=False)
+    # model_manager = ModelManager(model_dir="backend/models")
+    # save = model_manager.save_model(model, evaluate, save_path="linear_v2.pkl")
+    # loader = model_manager.load_model(name='linear_v2.pkl')
+    # print(loader)

@@ -1,18 +1,19 @@
-# from backend.app.utils.preprocessor import Preprocessor
-# from backend.app.models.lightgbm import LightGBMTrainer
-# from backend.app.models.model_manager import ModelManager
+from backend.app.utils.preprocessor import Preprocessor
+from backend.app.models.lightgbm import LightGBMTrainer
+from backend.app.models.model_manager import ModelManager
+from backend.app.utils.data_checker import DataCheckerTXT
 
 # 1. check data
-# data_checker = DataChecker()
-# data_checker.run_all()
+data_checker = DataCheckerTXT()
+data_checker.run_all()
 
 # 3. preprcess data
-# preprocessor = Preprocessor(dataset_path="backend/dataset/hourly_electricity_filtered.csv")
-# preprocessor.run_pipeline()
+preprocessor = Preprocessor(dataset_path="backend/dataset/hourly_electricity_filtered.csv")
+preprocessor.run_pipeline()
 
 # 4. trainer
-# trainer = LightGBMTrainer()
-# model, evaluate = trainer.train_model()
+trainer = LightGBMTrainer()
+model, evaluate = trainer.train_model()
 
 # 5. load model
 # model_manager = ModelManager(model_dir='backend/models')
