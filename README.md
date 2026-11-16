@@ -189,15 +189,18 @@ ls -lh backend/dataset/LD2011_2014.txt
 
 ---
 
-### Bước 1 — Khám phá dữ liệu bằng biểu đồ (`visualizations.py`)
+### Bước 1 — Khám phá dữ liệu bằng biểu đồ (`visualizations.py` & `run_eda.py`)
 
-File: `backend/app/utils/visualizations.py`
+File: `backend/app/utils/visualizations.py` và `backend/run_eda.py`
+
+> 📘 **Tài liệu chi tiết:** Xem hướng dẫn và giải thích đầy đủ các biểu đồ EDA tại [`docs/README.md`](docs/README.md).
 
 Mục đích: vẽ biểu đồ EDA trước khi xử lý — line plot, heatmap theo giờ/ngày, histogram, boxplot, ACF.
 
 ```bash
 cd backend
-python -m app.utils.visualizations
+python run_eda.py          # Chạy tự động vẽ & lưu toàn bộ 8 biểu đồ
+# hoặc: python -m app.utils.visualizations
 cd ..
 ```
 
