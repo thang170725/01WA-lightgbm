@@ -1,0 +1,79 @@
+{
+    "LightGBM_V2": {
+        "model_params": {
+            "boosting_type": "gbdt",
+            "class_weight": null,
+            "colsample_bytree": 0.8,
+            "importance_type": "split",
+            "learning_rate": 0.005,
+            "max_depth": 8,
+            "min_child_samples": 20,
+            "min_child_weight": 0.001,
+            "min_split_gain": 0.0,
+            "n_estimators": 3000,
+            "n_jobs": -1,
+            "num_leaves": 127,
+            "objective": "regression",
+            "random_state": 42,
+            "reg_alpha": 0.0,
+            "reg_lambda": 0.0,
+            "subsample": 0.8,
+            "subsample_for_bin": 200000,
+            "subsample_freq": 0,
+            "verbosity": -1
+        },
+        "best_iteration": 3000,
+        "test_metrics": {
+            "mae": 16.872470332271522,
+            "relative_mae": 7.61343428640323,
+            "mape": 10.003890527676795,
+            "rmse": 42.1877038585128,
+            "r2": 0.9779642549506925
+        },
+        "feature_importance": {
+            "lag_7d": 53406,
+            "rolling_mean_24h": 51120,
+            "lag_24h": 50513,
+            "rolling_std_24h": 50335,
+            "rolling_mean_7d": 48394,
+            "lag_72h": 33507,
+            "lag_48h": 29601,
+            "day_of_week": 27847,
+            "hour_cos": 16088,
+            "hour_sin": 13441,
+            "is_weekend": 2045
+        }
+    },
+    "Ridge_Linear_V2": {
+        "model_params": {
+            "alpha": 1.0,
+            "copy_X": true,
+            "fit_intercept": true,
+            "max_iter": null,
+            "positive": false,
+            "random_state": 42,
+            "solver": "auto",
+            "tol": 0.0001
+        },
+        "test_metrics": {
+            "mae": 18.67159727590584,
+            "relative_mae": 8.425261747854352,
+            "mape": 11.290898690529735,
+            "rmse": 42.29979197862265,
+            "r2": 0.9778470062645152
+        },
+        "feature_coefficients": {
+            "lag_7d": 0.5401805687348393,
+            "rolling_mean_24h": 0.4593092408915942,
+            "rolling_mean_7d": -0.37198071331276744,
+            "lag_24h": 0.18119418027259415,
+            "lag_72h": 0.14464881719689038,
+            "lag_48h": 0.05528785262978892,
+            "hour_sin": -0.021583228157218273,
+            "hour_cos": -0.01930185731885949,
+            "rolling_std_24h": -0.011984070091334335,
+            "day_of_week": -0.00661708046142007,
+            "is_weekend": -0.003326964164403399
+        }
+    }
+}

@@ -29,7 +29,7 @@ backend/app/__pycache__
 /build
 
 # model
-backend/models
+backend/models/*.pkl
 
 # misc
 .DS_Store

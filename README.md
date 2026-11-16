@@ -337,10 +337,20 @@ backend/dataset/test_ready3.csv
 
 File: `backend/app/models/lightgbm.py`
 
-| Class | Mô tả |
-|---|---|
-| `LightGBMTrainerV2` | Train LightGBM với early stopping |
-| `LinearTrainerV2` | Train Ridge Regression (baseline) |
+> 📘 **Tài liệu chi tiết nhánh `tuan_anh` (Huấn luyện & Đánh giá 2 Model):** Xem giải thích đầy đủ Input/Output của từng hàm, đồng bộ `log1p` và bảng kết quả thực nghiệm tại [`backend/app/models/README.md`](backend/app/models/README.md).
+
+| Class | Mô tả | Kết quả Test (`MAE` / `MAPE` / `R²`) |
+|---|---|---|
+| `LightGBMTrainerV2` | Train LightGBM với early stopping | `16.8725 kWh` / `10.00%` / `0.9780` |
+| `LinearTrainerV2` | Train Ridge Regression (baseline) | `18.6716 kWh` / `11.29%` / `0.9778` |
+
+**Chạy huấn luyện đồng thời cả 2 model bằng 1 lệnh duy nhất:**
+
+```bash
+python backend/app/models/lightgbm.py
+```
+
+**Hoặc gọi riêng từng model từ Python:**
 
 **Train LightGBM:**
 

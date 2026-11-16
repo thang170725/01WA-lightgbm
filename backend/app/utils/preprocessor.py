@@ -263,6 +263,14 @@ class Preprocessor:
 
     # 4. target transform (giữ nguyên, chỉ đổi số thứ tự thành 5)
     def transform_target(self, df):
+        # Đồng bộ log1p cho cả biến mục tiêu và 7 biến lag/rolling để khớp với FeatureBuilder lúc dự báo
+        lag_rolling_cols = [
+            "lag_24h", "lag_48h", "lag_72h", "lag_7d",
+            "rolling_mean_24h", "rolling_mean_7d", "rolling_std_24h"
+        ]
+        for col in lag_rolling_cols:
+            if col in df.columns:
+                df[col] = np.log1p(df[col].clip(lower=0)).astype("float32")
         df["target_value"] = (
             np.log1p(df["target_value"])
             .astype("float32")
