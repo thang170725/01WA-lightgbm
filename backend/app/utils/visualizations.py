@@ -419,6 +419,8 @@ class VisualDatasetTXTV1:
         Vẽ histogram phân phối tổng lượng điện năng tiêu thụ (aggregate).
 
         Bao gồm:
+        - X: tổng lượng điện năng tiêu thụ
+        - Y: số lần xuất hiện của các mức tiêu thụ đó trong dữ liệu
         - Histogram 50 bins + đường KDE (kernel density estimation)
         - Đường dọc mean (đỏ nét đứt) và median (xanh nét đứt)
         """

@@ -1162,31 +1162,162 @@ class LinearTrainerV2:
         return forecast_df
 
 
-if __name__ == "__main__":
-    # ===== train model version 2 (Mô hình 1: LightGBM Regressor) =====
-    # Input : 3 file CSV đã tiền xử lý (train_ready3.csv, valid_ready3.csv, test_ready3.csv)
-    # Output: File model "backend/models/lightgbm_model_v2.pkl" chứa {'model': lgb_model, 'evaluate': lgb_evaluate}
-    model = LightGBMTrainerV2(
-        train_path="backend/dataset/train_ready3.csv",
-        valid_path="backend/dataset/valid_ready3.csv",
-        test_path="backend/dataset/test_ready3.csv"
-    )
-    model, evaluate = model.train_model()
-    model_manager = ModelManager(model_dir="backend/models")
-    save = model_manager.save_model(model, evaluate, save_path="lightgbm_model_v2.pkl")
-    loader = model_manager.load_model(name='lightgbm_model_v2.pkl')
-    print(loader)
+# ==== V4: SCALE-FREE LIGHTGBM (khuyến nghị) ====
+# Dự đoán tỷ lệ y / scale (scale = trung bình 168h trước đó của chính khách hàng) rồi nhân lại scale
+# => không bị chi phối bởi khách hàng lớn (MT_362 ~48.000 kWh), không cần log1p / clip lag.
+import json
+import time
+from datetime import datetime
 
-    # ===== train model linear version 2 (Mô hình 2: Ridge Regression) =====
-    # Input : 3 file CSV đã tiền xử lý (train_ready3.csv, valid_ready3.csv, test_ready3.csv)
-    # Output: File model "backend/models/linear_v2.pkl" chứa {'model': linear_model, 'evaluate': linear_evaluate}
-    linear_trainer = LinearTrainerV2(
-        train_path="backend/dataset/train_ready3.csv",
-        valid_path="backend/dataset/valid_ready3.csv",
-        test_path="backend/dataset/test_ready3.csv"
-    )
-    linear_model, linear_evaluate = linear_trainer.train_model(save=False)
-    model_manager = ModelManager(model_dir="backend/models")
-    save_linear = model_manager.save_model(linear_model, linear_evaluate, save_path="linear_v2.pkl")
-    loader_linear = model_manager.load_model(name='linear_v2.pkl')
-    print(loader_linear)
+_V4_PARAMS = dict(
+    objective="regression", learning_rate=0.03, num_leaves=63, min_data_in_leaf=200,
+    feature_fraction=0.8, bagging_fraction=0.8, bagging_freq=1, lambda_l2=1.0,
+    max_bin=255, num_threads=-1, verbosity=-1, seed=42,
+)
+
+
+class _Tee:
+    # Ghi đồng thời ra màn hình và file log
+    def __init__(self, path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        self.f = open(path, "a", encoding="utf-8")
+
+    def __call__(self, *a):
+        msg = " ".join(str(x) for x in a)
+        print(msg, flush=True)
+        self.f.write(f"[{datetime.now():%H:%M:%S}] {msg}\n")
+        self.f.flush()
+
+
+def regression_metrics(y, p):
+    # Input : y, p (np.ndarray) kWh thực / dự đoán. Output: dict chỉ số (MAPE chỉ tính khi y > 1 kWh, tránh chia 0)
+    y = np.asarray(y, dtype="float64"); p = np.asarray(p, dtype="float64")
+    err = y - p
+    m = y > 1.0
+    return {
+        "mae": float(np.abs(err).mean()),
+        "rmse": float(np.sqrt((err ** 2).mean())),
+        "r2": float(1 - (err ** 2).sum() / ((y - y.mean()) ** 2).sum()),
+        "wape": float(np.abs(err).sum() / y.sum() * 100),
+        "relative_mae": float(np.abs(err).mean() / y.mean() * 100),
+        "mape": float((np.abs(err[m]) / y[m]).mean() * 100),
+        "smape": float((2 * np.abs(err) / (np.abs(y) + np.abs(p) + 1e-6)).mean() * 100),
+    }
+
+
+class LightGBMTrainerV4:
+    def __init__(self, data_dir="backend/dataset/processed_v4", log_dir="backend/logs",
+                 params=None, weight_power=0.5, num_boost_round=5000, early_stopping=100):
+        # data_dir: thư mục do Preprocessor.run_pipeline() tạo ra (.npy, đọc bằng mmap -> không tốn RAM)
+        self.data_dir = data_dir
+        self.params = {**_V4_PARAMS, **(params or {})}
+        self.weight_power = weight_power          # trọng số mẫu = scale ** power (0.5: cân bằng khách lớn/nhỏ)
+        self.num_boost_round = num_boost_round
+        self.early_stopping = early_stopping
+        self.log = _Tee(os.path.join(log_dir, f"train_v4_{datetime.now():%Y%m%d_%H%M%S}.log"))
+        info = json.load(open(os.path.join(data_dir, "preprocessing_metadata.json"), encoding="utf-8"))
+        self.features = info["features"]
+        self.clients = info["clients"]
+
+    def _load(self, name):
+        X = np.load(os.path.join(self.data_dir, f"{name}_X.npy"), mmap_mode="r")
+        m = np.load(os.path.join(self.data_dir, f"{name}_meta.npz"))
+        return X, m["y"], m["scale"], m["client"]
+
+    def _dataset(self, name, reference=None, cache=True):
+        # Dataset nhị phân (.bin) được cache lại lần sau nạp gần như tức thì và rất nhẹ RAM
+        X, y, s, _ = self._load(name)
+        w = np.power(s, self.weight_power).astype("float32")
+        w /= w.mean()
+        path = os.path.join(self.data_dir, f"{name}_p{self.weight_power}.bin")
+        if cache and os.path.exists(path):
+            return lgb.Dataset(path)
+        ds = lgb.Dataset(np.asarray(X), label=(y / s).astype("float32"), weight=w,
+                         feature_name=self.features, reference=reference, free_raw_data=True)
+        ds.construct()
+        if cache:
+            ds.save_binary(path)
+        return ds
+
+    def predict_kwh(self, booster, name, num_iteration=None):
+        X, y, s, c = self._load(name)
+        out = np.empty(len(y), dtype="float32")
+        step = 500_000  # dự đoán theo khối để tiết kiệm RAM
+        for i in range(0, len(y), step):
+            out[i:i + step] = booster.predict(np.asarray(X[i:i + step]), num_iteration=num_iteration)
+        return y, np.maximum(out * s, 0), c
+
+    def train_model(self, save_name="lightgbm_v4", model_dir="backend/models", refit_on_valid=True):
+        log = self.log
+        log("Params:", json.dumps(self.params), "| weight_power:", self.weight_power)
+        t0 = time.time()
+        dtr = self._dataset("train")
+        dva = self._dataset("valid", reference=dtr)
+        log(f"Datasets ready in {time.time() - t0:.1f}s | train rows={dtr.num_data():,} valid rows={dva.num_data():,}")
+        ev = {}
+        booster = lgb.train(
+            self.params, dtr, self.num_boost_round, valid_sets=[dva], valid_names=["valid"],
+            callbacks=[lgb.log_evaluation(100), lgb.early_stopping(self.early_stopping),
+                       lgb.record_evaluation(ev)],
+        )
+        best = booster.best_iteration
+        log(f"Best iteration: {best} | train time {time.time() - t0:.0f}s")
+
+        y, p, c = self.predict_kwh(booster, "test", best)
+        evaluate = regression_metrics(y, p)
+        log("=== TEST (2014) metrics, kWh ===", json.dumps(evaluate))
+        per = pd.DataFrame({"c": c, "y": y, "p": p}).groupby("c").apply(
+            lambda g: pd.Series({"wape": np.abs(g.y - g.p).sum() / max(g.y.sum(), 1e-9) * 100, "mean": g.y.mean()}))
+        per.index = [self.clients[i] for i in per.index]
+        log(f"Per-client WAPE%: median={per.wape.median():.2f} p90={per.wape.quantile(.9):.2f} max={per.wape.max():.2f}")
+        log("Worst 5 clients:\n" + per.sort_values("wape").tail(5).to_string())
+        imp = pd.DataFrame({"feature": self.features, "gain": booster.feature_importance("gain")})
+        log("Feature importance (gain):\n" + imp.sort_values("gain", ascending=False).to_string(index=False))
+
+        final = booster
+        if refit_on_valid:
+            # Huấn luyện lại trên train+valid (số vòng = best*1.1) để dùng dữ liệu gần thời điểm test nhất
+            Xt, yt, st, _ = self._load("train"); Xv, yv, sv, _ = self._load("valid")
+            X = np.vstack([np.asarray(Xt), np.asarray(Xv)])
+            ratio = np.concatenate([yt / st, yv / sv]).astype("float32")
+            w = np.power(np.concatenate([st, sv]), self.weight_power).astype("float32"); w /= w.mean()
+            full = lgb.Dataset(X, label=ratio, weight=w, feature_name=self.features)
+            refit = lgb.train(self.params, full, int(best * 1.1))
+            y2, p2, _ = self.predict_kwh(refit, "test")
+            m2 = regression_metrics(y2, p2)
+            log("=== TEST metrics after refit on train+valid ===", json.dumps(m2))
+            if m2["rmse"] < evaluate["rmse"]:
+                final, evaluate = refit, {**m2, "refit": True}
+            del X, full
+
+        os.makedirs(model_dir, exist_ok=True)
+        final.save_model(os.path.join(model_dir, f"{save_name}.txt"))
+        joblib.dump({"model": final, "evaluate": evaluate, "features": self.features, "kind": "ratio_v4"},
+                    os.path.join(model_dir, f"{save_name}.pkl"))
+        log(f"Saved: {model_dir}/{save_name}.pkl (+ .txt)")
+        return final, evaluate
+
+
+def forecast_v4(model, history, start_time, steps):
+    # model: Booster | LGBM; history: list kWh (>=168, giờ liên tiếp); trả DataFrame [time, prediction] (kWh)
+    from preprocessing_services.feature_engineering import build_row_features, FEATURE_COLUMNS
+    history = list(history)
+    t = pd.to_datetime(start_time)
+    rows = []
+    for _ in range(steps):
+        f, scale = build_row_features(history, t)
+        pred = float(model.predict(np.array([[f[k] for k in FEATURE_COLUMNS]], dtype="float32"))[0]) * scale
+        pred = max(pred, 0.0)
+        rows.append({"time": t, "prediction": pred})
+        history.append(pred)
+        t += pd.Timedelta(hours=1)
+    return pd.DataFrame(rows)
+
+
+if __name__ == "__main__":
+    from preprocessing_services.preprocessor import Preprocessor
+    # Bước 1: tiền xử lý (bỏ qua nếu đã có cache: xoá thư mục processed_v4 để chạy lại)
+    if not os.path.exists("backend/dataset/processed_v4/preprocessing_metadata.json"):
+        Preprocessor("backend/dataset/hourly_electricity_2013_2014.csv").run_pipeline("backend/dataset/processed_v4")
+    # Bước 2: train LightGBM scale-free
+    LightGBMTrainerV4().train_model()
