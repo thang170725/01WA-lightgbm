@@ -28,9 +28,8 @@ MIN_HISTORY = 168  # hours required before a row has all features
 TIME_FEATURES = ["hour", "day_of_week", "is_weekend", "hour_sin", "hour_cos"]
 RATIO_FEATURES = [
     "lag_24h", "lag_48h", "lag_72h", "lag_96h", "lag_120h", "lag_144h", "lag_7d",
-    "rolling_mean_24h", "rolling_std_24h", "rolling_min_24h", "rolling_max_24h",
+    "rolling_mean_24h", "rolling_std_24h", "rolling_min_24h", "rolling_max_24h", "rolling_mean_6h",
     "same_hour_mean_7d", "same_hour_std_7d", "same_hour_max_7d", "same_hour_min_7d",
-    "last_value", "rolling_mean_6h",
 ]
 LEVEL_FEATURES = ["log_scale", "cv_7d"]
 FEATURE_COLUMNS = TIME_FEATURES + RATIO_FEATURES + LEVEL_FEATURES
@@ -70,8 +69,17 @@ def rolling_stat(a: np.ndarray, w: int, fn: str) -> np.ndarray:
     return out
 
 
+HORIZON = 24  # strict day-ahead: every feature only uses data at or before t-24
+SCALE_WINDOW = 144  # 6 days, ends at t-24 -> needs history back to t-167 (<= 168)
+
+
+def _known(a: np.ndarray, w: int, fn: str) -> np.ndarray:
+    """Statistic over the w values a[t-24-w+1 .. t-24] (window ends HORIZON hours ago)."""
+    return _shift(rolling_stat(a, w, fn), HORIZON - 1)
+
+
 def compute_feature_arrays(values: np.ndarray, timestamps) -> tuple[dict[str, np.ndarray], np.ndarray]:
-    """Vectorised features for a wide matrix.
+    """Vectorised day-ahead features for a wide matrix (no information newer than t-24).
 
     values     : (T, C) float array of consecutive hourly kWh (NaN = missing)
     timestamps : (T,) hourly timestamps
@@ -83,44 +91,29 @@ def compute_feature_arrays(values: np.ndarray, timestamps) -> tuple[dict[str, np
     T, C = y.shape
 
     lag = {h: _shift(y, h) for h in (24, 48, 72, 96, 120, 144, 168)}
-    scale_raw = rolling_stat(y, 168, "mean")
-    scale = np.maximum(scale_raw, EPS).astype("float32")
+    scale = np.maximum(_known(y, SCALE_WINDOW, "mean"), EPS).astype("float32")
+    inv = 1.0 / scale
 
-    # same hour of day over the previous 7 days: lag 24,48,...,168
-    stack = np.stack([lag[h] for h in (24, 48, 72, 96, 120, 144, 168)], axis=0)
-    sh_mean = stack.mean(axis=0)
-    sh_std = stack.std(axis=0)
-    sh_max = stack.max(axis=0)
-    sh_min = stack.min(axis=0)
-
-    r24_mean = rolling_stat(y, 24, "mean")
+    stack = np.stack([lag[h] for h in (24, 48, 72, 96, 120, 144, 168)], axis=0)  # same hour, past 7 days
     feats: dict[str, np.ndarray] = {}
-    tf = time_features(timestamps)
-    for k, v in tf.items():
+    for k, v in time_features(timestamps).items():
         feats[k] = np.repeat(v[:, None], C, axis=1)
 
-    inv = 1.0 / scale
-    feats["lag_24h"] = lag[24] * inv
-    feats["lag_48h"] = lag[48] * inv
-    feats["lag_72h"] = lag[72] * inv
-    feats["lag_96h"] = lag[96] * inv
-    feats["lag_120h"] = lag[120] * inv
-    feats["lag_144h"] = lag[144] * inv
-    feats["lag_7d"] = lag[168] * inv
-    feats["rolling_mean_24h"] = r24_mean * inv
-    feats["rolling_std_24h"] = rolling_stat(y, 24, "std") * inv
-    feats["rolling_min_24h"] = rolling_stat(y, 24, "min") * inv
-    feats["rolling_max_24h"] = rolling_stat(y, 24, "max") * inv
-    feats["same_hour_mean_7d"] = sh_mean * inv
-    feats["same_hour_std_7d"] = sh_std * inv
-    feats["same_hour_max_7d"] = sh_max * inv
-    feats["same_hour_min_7d"] = sh_min * inv
-    feats["last_value"] = _shift(y, 1) * inv
-    feats["rolling_mean_6h"] = rolling_stat(y, 6, "mean") * inv
+    for name, h in (("lag_24h", 24), ("lag_48h", 48), ("lag_72h", 72), ("lag_96h", 96),
+                    ("lag_120h", 120), ("lag_144h", 144), ("lag_7d", 168)):
+        feats[name] = lag[h] * inv
+    feats["rolling_mean_24h"] = _known(y, 24, "mean") * inv
+    feats["rolling_std_24h"] = _known(y, 24, "std") * inv
+    feats["rolling_min_24h"] = _known(y, 24, "min") * inv
+    feats["rolling_max_24h"] = _known(y, 24, "max") * inv
+    feats["rolling_mean_6h"] = _known(y, 6, "mean") * inv
+    feats["same_hour_mean_7d"] = stack.mean(axis=0) * inv
+    feats["same_hour_std_7d"] = stack.std(axis=0) * inv
+    feats["same_hour_max_7d"] = stack.max(axis=0) * inv
+    feats["same_hour_min_7d"] = stack.min(axis=0) * inv
     feats["log_scale"] = np.log1p(scale)
-    feats["cv_7d"] = rolling_stat(y, 168, "std") * inv
-    feats = {k: np.asarray(v, dtype="float32") for k, v in feats.items()}
-    return feats, scale
+    feats["cv_7d"] = _known(y, SCALE_WINDOW, "std") * inv
+    return {k: np.asarray(v, dtype="float32") for k, v in feats.items()}, scale
 
 
 def build_row_features(history, timestamp) -> tuple[dict[str, float], float]:

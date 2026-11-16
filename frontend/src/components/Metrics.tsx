@@ -1,12 +1,6 @@
 "use client";
 
-export type EvaluateMetrics = {
-    mae: number;
-    relative_mae?: number;
-    mape: number;
-    rmse: number;
-    r2: number;
-};
+import type { EvaluateMetrics } from "@/routes/UploadApi";
 
 const accentRing = [
     "ring-indigo-500/15",
@@ -42,6 +36,12 @@ export default function Metrics({ evaluate }: { evaluate: EvaluateMetrics }) {
             subtitle: "Root mean squared",
             value: evaluate.rmse.toFixed(2),
         },
+        ...(evaluate.wape != null
+            ? [{ title: "WAPE", subtitle: "Σ|err| / Σ actual", value: `${evaluate.wape.toFixed(2)}%` }]
+            : []),
+        ...(evaluate.coverage_80 != null
+            ? [{ title: "80% band", subtitle: "Actual inside lo–hi (test)", value: `${evaluate.coverage_80.toFixed(1)}%` }]
+            : []),
         {
             title: "R²",
             subtitle: "Coefficient of determination",
@@ -56,7 +56,7 @@ export default function Metrics({ evaluate }: { evaluate: EvaluateMetrics }) {
                     Model performance (test set)
                 </h2>
             </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
                 {metrics.map((m, i) => (
                     <div
                         key={m.title}

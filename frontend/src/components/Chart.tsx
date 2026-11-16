@@ -10,19 +10,16 @@ import {
     YAxis,
 } from "recharts";
 
-type DataPoint = {
-    time: string;
-    value: number;
-};
+import type { ForecastPoint } from "@/routes/UploadApi";
 
 function formatHour(iso: string) {
     return iso.slice(11, 16);
 }
 
-export default function Chart({ data }: { data: DataPoint[] }) {
-    const values = data.map((d) => d.value);
-    const minV = Math.min(...values);
-    const maxV = Math.max(...values);
+export default function Chart({ data }: { data: ForecastPoint[] }) {
+    const rows = data.map((d) => ({ ...d, range: [d.lo, d.hi] as [number, number] }));
+    const minV = Math.min(...data.map((d) => d.lo));
+    const maxV = Math.max(...data.map((d) => d.hi));
     const pad = (maxV - minV) * 0.08 || 0.1;
 
     return (
@@ -33,7 +30,7 @@ export default function Chart({ data }: { data: DataPoint[] }) {
                         Next 24 hours
                     </h2>
                     <p className="mt-1 text-sm text-slate-500">
-                        Predicted load (hourly)
+                        Predicted load (hourly) with 80% prediction band
                     </p>
                 </div>
                 <div className="rounded-lg bg-teal-50 px-3 py-1.5 text-xs font-medium text-teal-800 ring-1 ring-teal-700/10">
@@ -44,7 +41,7 @@ export default function Chart({ data }: { data: DataPoint[] }) {
             <div className="min-h-0 flex-1">
                 <ResponsiveContainer width="100%" height="100%">
                     <AreaChart
-                        data={data}
+                        data={rows}
                         margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
                     >
                         <defs>
@@ -102,14 +99,26 @@ export default function Chart({ data }: { data: DataPoint[] }) {
                             }
                             formatter={(value) => {
                                 const v = value as number | string | undefined;
-                                const text =
-                                    typeof v === "number"
-                                        ? v.toFixed(4)
-                                        : v != null
-                                          ? String(v)
-                                          : "—";
-                                return [text, "Predicted"];
+                                const text = Array.isArray(v)
+                                    ? `${Number(v[0]).toFixed(2)} – ${Number(v[1]).toFixed(2)}`
+                                    : typeof v === "number"
+                                      ? v.toFixed(2)
+                                      : v != null
+                                        ? String(v)
+                                        : "—";
+                                return [text, Array.isArray(v) ? "80% band (lo–hi)" : "Predicted"];
                             }}
+                        />
+                        <Area
+                            type="monotone"
+                            dataKey="range"
+                            name="80% band"
+                            stroke="none"
+                            fill="rgb(13, 148, 136)"
+                            fillOpacity={0.15}
+                            dot={false}
+                            activeDot={false}
+                            isAnimationActive={false}
                         />
                         <Area
                             type="monotone"
@@ -117,7 +126,7 @@ export default function Chart({ data }: { data: DataPoint[] }) {
                             name="Prediction"
                             stroke="rgb(13, 148, 136)"
                             strokeWidth={2.5}
-                            fill="url(#forecastFill)"
+                            fill="transparent"
                             dot={false}
                             activeDot={{
                                 r: 5,

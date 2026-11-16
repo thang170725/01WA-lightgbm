@@ -1,12 +1,24 @@
-from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
 import io
-from app.models.lightgbm import LightGBMTrainerV2, LinearTrainerV2
-from app.models.model_manager import ModelManager
+import os
+import sys
 
-app = FastAPI()
+import pandas as pd
+from fastapi import FastAPI, File, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 
+# Đảm bảo import được 'app' và 'preprocessing_services' dù chạy từ root hay từ backend/
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
+
+from app.models.lightgbm import forecast_v4  # noqa: E402
+from app.models.model_manager import ModelManager  # noqa: E402
+
+MIN_HISTORY = 168  # 7 ngày
+MAX_STEPS = 168    # tối đa 7 ngày dự báo
+MODEL_FILE = "lightgbm_v4.pkl"
+
+app = FastAPI(title="LightGBM electricity forecast")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,81 +27,46 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Khởi tạo bộ quản lý model và 2 trainer cho LightGBM & Linear (Ridge)
-manager = ModelManager()
-lightgbm_trainer = LightGBMTrainerV2()
-linear_trainer = LinearTrainerV2()
-
-# Nạp mô hình LightGBM (Model 1) và bộ chỉ số đánh giá từ file .pkl
-lgb_loader = manager.load_model(name="lightgbm_model_v2.pkl")
-lgb_model = lgb_loader["model"]
-lgb_evaluate = lgb_loader["evaluate"]
-
-# Nạp mô hình Ridge Regression (Model 2) và bộ chỉ số đánh giá từ file .pkl
-linear_loader = manager.load_model(name="linear_v2.pkl")
-linear_model = linear_loader["model"]
-linear_evaluate = linear_loader["evaluate"]
+# Nạp model LightGBM (trung bình + phân vị 10% / 90%) cùng bộ chỉ số đánh giá
+manager = ModelManager(model_dir=os.path.join(_BACKEND_DIR, "models"))
+bundle = manager.load_model(name=MODEL_FILE)
+lgb_evaluate = bundle["evaluate"]
 
 
-async def _predict_from_upload(file: UploadFile, trainer, model, evaluate: dict):
-    # Input :
-    #   - file (UploadFile) : File CSV người dùng upload lên (cần có 2 cột 'time', 'value' và >= 168 dòng)
-    #   - trainer (object)  : Đối tượng LightGBMTrainerV2 hoặc LinearTrainerV2 dùng để gọi forecast_future
-    #   - model (object)    : Mô hình học máy đã huấn luyện (lgb_model hoặc linear_model)
-    #   - evaluate (dict)   : Bộ chỉ số đánh giá mô hình trên tập Test (mae, relative_mae, mape, rmse, r2)
-    # Output:
-    #   - dict              : Dictionary trả về cho Frontend gồm {"result": list 24 điểm dự báo, "evaluate": dict metrics}
-    contents = await file.read()
-
-    df = pd.read_csv(
-        io.StringIO(contents.decode("utf-8")),
-        parse_dates=["time"],
-    )
-    df = df.sort_values("time")
-
-    history = df["value"].tolist()
-
-    if len(history) < 168:
-        return {"error": "Need at least 168 rows"}
-
-    start_time = df["time"].iloc[-1] + pd.Timedelta(hours=1)
-
-    forecast_df = trainer.forecast_future(
-        model=model,
-        history=history,
-        start_time=start_time,
-        steps=24,
-    )
-
-    forecast_df = forecast_df.rename(columns={"prediction": "value"})
-    result = forecast_df[["time", "value"]].copy()
-    result = result.where(pd.notnull(result), None)
-
-    return {
-        "result": result.to_dict(orient="records"),
-        "evaluate": evaluate,
-    }
+@app.get("/health")
+def health():
+    return {"status": "ok", "model": MODEL_FILE}
 
 
 @app.post("/predict_lightgbm")
-async def predict_lightgbm(file: UploadFile = File(...)):
-    # Input : file (UploadFile) - File CSV lịch sử tiêu thụ điện gửi qua multipart/form-data
-    # Output: dict - Kết quả dự báo 24 giờ tiếp theo và metrics của mô hình LightGBM
+async def predict_lightgbm(
+    file: UploadFile = File(...),
+    steps: int = Query(24, ge=1, le=MAX_STEPS, description="Số giờ dự báo (24 = 1 ngày, 168 = 7 ngày)"),
+):
+    # Input : CSV 2 cột time,value (>= 168 giờ liên tiếp); steps = số giờ cần dự báo
+    # Output: {"result": [{time, value, lo, hi}], "evaluate": {...}, "band": "80%"}
     try:
-        return await _predict_from_upload(
-            file, lightgbm_trainer, lgb_model, lgb_evaluate
-        )
-    except Exception as e:
-        return {"error": str(e)}
+        contents = await file.read()
+        df = pd.read_csv(io.StringIO(contents.decode("utf-8")), parse_dates=["time"])
+        df = df.sort_values("time").dropna(subset=["value"])
+        if len(df) < MIN_HISTORY:
+            return {"error": f"Need at least {MIN_HISTORY} rows"}
+        if (df["value"] < 0).any():
+            return {"error": "value must be non-negative"}
 
+        # Chuẩn hoá về lưới giờ liên tục (giờ thiếu được nội suy) để lag đúng nghĩa
+        series = df.set_index("time")["value"].astype("float64")
+        series = series[~series.index.duplicated(keep="last")]
+        series = series.resample("1h").mean().interpolate(limit_direction="both")
+        history = series.tolist()
+        start_time = series.index[-1] + pd.Timedelta(hours=1)
 
-@app.post("/predict_linear")
-async def predict_linear(file: UploadFile = File(...)):
-    # Input : file (UploadFile) - File CSV lịch sử tiêu thụ điện gửi qua multipart/form-data
-    # Output: dict - Kết quả dự báo 24 giờ tiếp theo và metrics của mô hình Ridge Regression
-    try:
-        return await _predict_from_upload(
-            file, linear_trainer, linear_model, linear_evaluate
-        )
-    except Exception as e:
+        forecast_df = forecast_v4(bundle, history, start_time, steps)
+        forecast_df["time"] = forecast_df["time"].dt.strftime("%Y-%m-%dT%H:%M:%S")
+        return {
+            "result": forecast_df[["time", "value", "lo", "hi"]].round(4).to_dict(orient="records"),
+            "evaluate": lgb_evaluate,
+            "band": "80%",
+        }
+    except Exception as e:  # noqa: BLE001
         return {"error": str(e)}

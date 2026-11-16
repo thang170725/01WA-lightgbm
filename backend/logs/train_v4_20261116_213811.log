@@ -1,0 +1,36 @@
+[21:38:11] Params: {"objective": "regression", "learning_rate": 0.03, "num_leaves": 63, "min_data_in_leaf": 200, "feature_fraction": 0.8, "bagging_fraction": 0.8, "bagging_freq": 1, "lambda_l2": 1.0, "max_bin": 255, "num_threads": -1, "verbosity": -1, "seed": 42} | weight_power: 0.5
+[21:38:12] Datasets ready in 0.3s | train rows=1,149,120 valid rows=397,440
+[21:39:04] [mean] completed 1000 iterations | time=53s
+[21:48:23] [q10] completed 1000 iterations | time=558s
+[21:57:17] [q90] completed 1000 iterations | time=534s
+[21:58:22] === TRAIN === {"mae": 41.64841672855525, "rmse": 307.4133916594804, "r2": 0.9960074218557076, "wape": 5.142679336653725, "relative_mae": 5.142679336653725, "mape": 7.6494734494558765, "smape": 6.348169252982336, "coverage_80": 80.08214981899192, "band_width_pct": 16.158348083496094}
+[21:58:44] === VALID === {"mae": 46.00183747841136, "rmse": 377.0440452034732, "r2": 0.9896010008386574, "wape": 6.295763852995133, "relative_mae": 6.295763852995134, "mape": 9.928264798193522, "smape": 7.87594373347292, "coverage_80": 78.06889090177134, "band_width_pct": 16.361371994018555}
+[22:00:05] === TEST === {"mae": 49.09022715404546, "rmse": 466.93186661951194, "r2": 0.9895617377463132, "wape": 6.323310867948368, "relative_mae": 6.323310867948368, "mape": 8.972389222465196, "smape": 7.199054946392258, "coverage_80": 79.13013698630137, "band_width_pct": 16.499814987182617}
+[22:00:05] Overfit check: WAPE train 5.14% | valid 6.30% | test 6.32% (test-train gap +1.18 điểm %)
+[22:00:05] Per-client WAPE%: median=5.37 p90=9.56 max=75.19
+[22:00:05] Feature importance (gain):
+          feature          gain
+same_hour_mean_7d 998108.686560
+           lag_7d 540493.081337
+          lag_24h 293581.515959
+        log_scale  29577.002880
+ same_hour_max_7d  24067.368046
+      day_of_week  21649.188959
+            cv_7d  16132.365756
+  rolling_std_24h  15041.299314
+ same_hour_std_7d  14402.998443
+         lag_144h  13658.621192
+  rolling_max_24h  12468.026101
+          lag_48h   8742.132324
+ rolling_mean_24h   8291.661312
+  rolling_min_24h   7952.798119
+          lag_72h   7375.309774
+         lag_120h   7187.173292
+ same_hour_min_7d   6770.820398
+          lag_96h   6423.391315
+  rolling_mean_6h   6241.159228
+       is_weekend   4706.290729
+             hour   3490.114013
+         hour_cos   2552.698206
+         hour_sin   2142.433014
+[22:00:05] Saved: backend/models/lightgbm_v4.pkl

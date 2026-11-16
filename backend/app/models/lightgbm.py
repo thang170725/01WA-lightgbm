@@ -22,7 +22,6 @@ from sklearn.metrics import (
 
 from app.models.feature_builder import FeatureBuilder
 from app.models.model_manager import ModelManager
-from sklearn.linear_model import LinearRegression, Ridge
 
 
 def _resolve_csv_path(path: str) -> str:
@@ -590,11 +589,14 @@ class LightGBMTrainerV2:
     # ==== predict new data ====
     def preprocess_input(
         self,
-        input_dict  # Input: dictionary chứa 11 đặc trưng của 1 mốc thời gian
+        input_dict,  # Input: dictionary chứa 11 đặc trưng của 1 mốc thời gian
+        features=None
     ):
         """
         input_dict:
             dữ liệu user nhập dạng dict
+        features:
+            danh sách feature theo thứ tự (mặc định self.features)
         """
         # Input : input_dict (dict) - Dictionary chứa 11 đặc trưng của thời điểm cần dự đoán
         # Output: df (pd.DataFrame) - DataFrame kích thước (1, 11) đúng thứ tự cột self.features
@@ -603,7 +605,7 @@ class LightGBMTrainerV2:
         df = pd.DataFrame([input_dict])
 
         # đảm bảo đúng thứ tự feature
-        df = df[self.features]
+        df = df[features or self.features]
 
         return df
 
@@ -622,8 +624,10 @@ class LightGBMTrainerV2:
         # Output:
         #   - preds[0] (float)         : Giá trị tiêu thụ điện dự đoán (kWh) sau khi biến đổi ngược np.expm1
 
+        # dùng đúng danh sách feature mà model đã được train
         X_new = self.preprocess_input(
-            input_dict
+            input_dict,
+            features=getattr(model, "feature_name_", None)
         )
 
         preds = model.predict(X_new)
@@ -749,419 +753,6 @@ class LightGBMTrainerV2:
         return forecast_df
 
 
-# ==== LINEAR / RIDGE TRAINER ====
-# Lớp huấn luyện & dự báo cho MÔ HÌNH 2: Ridge Regression (Version 2 - dùng làm Baseline đối sánh)
-class LinearTrainerV2:
-    def __init__(
-        self,
-        train_path="dataset/train_ready3.csv",  # Input 1: đường dẫn file CSV tập Train
-        valid_path="dataset/valid_ready3.csv",  # Input 2: đường dẫn file CSV tập Valid
-        test_path="dataset/test_ready3.csv"     # Input 3: đường dẫn file CSV tập Test
-    ):
-        # Input :
-        #   - train_path (str): Đường dẫn file CSV tập huấn luyện (mặc định "dataset/train_ready3.csv")
-        #   - valid_path (str): Đường dẫn file CSV tập kiểm định (mặc định "dataset/valid_ready3.csv")
-        #   - test_path  (str): Đường dẫn file CSV tập kiểm tra (mặc định "dataset/test_ready3.csv")
-        # Output:
-        #   - None: Khởi tạo đối tượng LinearTrainerV2 với cùng bộ 11 features và target như LightGBM
-        print("Loading datasets (train, valid, test)...")
-
-        self.train = _sync_log1p_features(pd.read_csv(_resolve_csv_path(train_path)))
-        self.valid = _sync_log1p_features(pd.read_csv(_resolve_csv_path(valid_path)))
-        self.test = _sync_log1p_features(pd.read_csv(_resolve_csv_path(test_path)))
-
-        # Sử dụng chung 11 đặc trưng đầu vào với LightGBM để đối sánh kết quả công bằng
-        self.features = [
-            "hour_sin",
-            "hour_cos",
-            "day_of_week",
-            "is_weekend",
-
-            "lag_24h",
-            "lag_48h",
-            "lag_72h",
-            "lag_7d",
-
-            "rolling_mean_24h",
-            "rolling_mean_7d",
-            "rolling_std_24h"
-        ]
-
-        self.target = "target_value"
-
-    # ==================================================
-    # DATA
-    # ==================================================
-    def get_data(self):
-        # Input : Không có tham số truyền vào
-        # Output: Tuple 6 phần tử (X_train, y_train, X_valid, y_valid, X_test, y_test)
-        #         - X_train, X_valid, X_test (pd.DataFrame): Ma trận 11 đặc trưng của 3 tập
-        #         - y_train, y_valid, y_test (pd.Series)   : Vector nhãn mục tiêu (target_value) của 3 tập
-        print("\nPreparing data...")
-
-        steps = ["Train", "Valid", "Test"]
-
-        data = []
-
-        for step in tqdm(
-            steps,
-            desc="Splitting data"
-        ):
-            if step == "Train":
-                data.append(
-                    (
-                        self.train[self.features],
-                        self.train[self.target]
-                    )
-                )
-
-            elif step == "Valid":
-                data.append(
-                    (
-                        self.valid[self.features],
-                        self.valid[self.target]
-                    )
-                )
-
-            else:
-                data.append(
-                    (
-                        self.test[self.features],
-                        self.test[self.target]
-                    )
-                )
-
-        (
-            (X_train, y_train),
-            (X_valid, y_valid),
-            (X_test, y_test)
-        ) = data
-
-        return (
-            X_train,
-            y_train,
-            X_valid,
-            y_valid,
-            X_test,
-            y_test
-        )
-
-    # ==================================================
-    # MODEL
-    # ==================================================
-    def build_model(self):
-        # Input : Không có tham số truyền vào
-        # Output: model (sklearn.linear_model.Ridge) - Mô hình hồi quy tuyến tính có điều chuẩn L2 (alpha=1.0)
-        return Ridge(
-            alpha=1.0,
-            random_state=42
-        )
-
-    # ==================================================
-    # METRICS
-    # ==================================================
-    def evaluate(
-        self,
-        y_true,  # Input 1: mảng/Series giá trị thực tế trên tập Test (thang log1p)
-        preds    # Input 2: mảng/Series giá trị dự đoán của mô hình Ridge (thang log1p)
-    ):
-        # Input :
-        #   - y_true (np.ndarray | pd.Series): Giá trị thực tế của tập Test (ở thang đo log1p)
-        #   - preds  (np.ndarray | pd.Series): Giá trị dự đoán của mô hình Ridge (ở thang đo log1p)
-        # Output:
-        #   - dict: Dictionary chứa 5 chỉ số đánh giá kiểu float {"mae", "relative_mae", "mape", "rmse", "r2"}
-        y_true = np.expm1(y_true)  # Đưa nhãn thực tế về đơn vị gốc (kWh)
-        preds = np.expm1(preds)    # Đưa giá trị dự đoán về đơn vị gốc (kWh)
-
-        mae = mean_absolute_error(
-            y_true,
-            preds
-        )
-
-        relative_mae = (
-            mae / np.mean(y_true)
-        ) * 100
-
-        rmse = np.sqrt(
-            mean_squared_error(
-                y_true,
-                preds
-            )
-        )
-
-        mape = np.mean(
-            np.abs(
-                (
-                    y_true - preds
-                ) / y_true
-            )
-        ) * 100
-
-        r2 = r2_score(
-            y_true,
-            preds
-        )
-
-        print(f"MAE: {mae:.4f}")
-        print(f"Relative MAE: {relative_mae:.2f}%")
-        print(f"RMSE: {rmse:.4f}")
-        print(f"MAPE: {mape:.2f}%")
-        print(f"R2 SCORE: {r2:.4f}")
-
-        return {
-            "mae": float(mae),
-            "relative_mae": float(relative_mae),
-            "mape": float(mape),
-            "rmse": float(rmse),
-            "r2": float(r2)
-        }
-
-    # ==================================================
-    # TRAIN
-    # ==================================================
-    def train_model(
-        self,
-        save: bool = False  # Input: cờ tùy chọn có lưu trực tiếp model bằng joblib hay không
-    ):
-        # Input :
-        #   - save (bool): Tùy chọn lưu file .pkl trực tiếp trong hàm (mặc định False)
-        # Output:
-        #   - Tuple (model, evaluate):
-        #       + model (Ridge)  : Mô hình Ridge Regression đã huấn luyện xong
-        #       + evaluate (dict): Dictionary chứa 5 chỉ số đánh giá trên tập Test
-        (
-            X_train,
-            y_train,
-            X_valid,
-            y_valid,
-            X_test,
-            y_test
-        ) = self.get_data()
-
-        model = self.build_model()
-
-        print("\nTraining Linear Regression...")
-
-        for _ in tqdm(
-            range(1),
-            desc="Fitting Linear Regression"
-        ):
-            model.fit(
-                X_train,
-                y_train
-            )
-
-        print("\nPredicting...")
-
-        preds = model.predict(
-            X_test
-        )
-
-        print("\n=== Test Metrics ===")
-
-        evaluate = self.evaluate(
-            y_test,
-            preds
-        )
-
-        print(
-            "evaluate:",
-            evaluate
-        )
-
-        importance = pd.DataFrame({
-            "feature": self.features,
-            "coefficient": model.coef_
-        })
-
-        importance["abs_coef"] = (
-            importance["coefficient"]
-            .abs()
-        )
-
-        importance = (
-            importance
-            .sort_values(
-                "abs_coef",
-                ascending=False
-            )
-        )
-
-        print(
-            "\nFeature coefficients:\n",
-            importance[
-                [
-                    "feature",
-                    "coefficient"
-                ]
-            ]
-        )
-
-        if save:
-            save_dir = "backend/models" if os.path.exists("backend") else "models"
-            os.makedirs(save_dir, exist_ok=True)
-            joblib.dump(
-                model,
-                os.path.join(save_dir, "linear_v2.pkl")
-            )
-
-            print(
-                f"\nModel saved: {os.path.join(save_dir, 'linear_v2.pkl')}"
-            )
-
-        return model, evaluate
-
-    # ==================================================
-    # INPUT PREPROCESS
-    # ==================================================
-    def preprocess_input(
-        self,
-        input_dict  # Input: dictionary chứa 11 đặc trưng của 1 mốc thời gian
-    ):
-        # Input : input_dict (dict) - Dictionary chứa 11 đặc trưng của thời điểm cần dự đoán
-        # Output: df (pd.DataFrame) - DataFrame 1 dòng, 11 cột đúng thứ tự self.features
-        df = pd.DataFrame(
-            [input_dict]
-        )
-
-        df = df[self.features]
-
-        return df
-
-    # ==================================================
-    # PREDICT ONE SAMPLE
-    # ==================================================
-    def predict_new(
-        self,
-        model,       # Input 1: mô hình Ridge đã huấn luyện
-        input_dict   # Input 2: dictionary chứa 11 đặc trưng của 1 thời điểm
-    ):
-        # Input :
-        #   - model (Ridge)    : Mô hình Ridge đã train
-        #   - input_dict (dict): 11 đặc trưng của 1 bước thời gian
-        # Output:
-        #   - preds[0] (float) : Giá trị tiêu thụ điện dự đoán (kWh) sau khi biến đổi ngược np.expm1
-        X_new = self.preprocess_input(
-            input_dict
-        )
-
-        preds = model.predict(
-            X_new
-        )
-
-        preds = np.expm1(
-            preds
-        )
-
-        return preds[0]
-
-    # ==================================================
-    # FORECAST FUTURE
-    # ==================================================
-    def forecast_future(
-        self,
-        model,       # Input 1: mô hình Ridge đã huấn luyện
-        history,     # Input 2: danh sách giá trị quá khứ (>= 168 giờ)
-        start_time,  # Input 3: mốc thời gian bắt đầu dự đoán
-        steps        # Input 4: số bước tương lai cần dự báo (vd: 24 giờ)
-    ):
-        # Input :
-        #   - model (Ridge)                 : Mô hình Ridge đã train
-        #   - history (list[float])         : Chuỗi giá trị lịch sử tiêu thụ (>= 168 giờ)
-        #   - start_time (str | pd.Timestamp): Mốc thời gian bắt đầu dự báo
-        #   - steps (int)                   : Số giờ tương lai cần dự báo (vd: 24 giờ)
-        # Output:
-        #   - pd.DataFrame                  : Bảng kết quả dự báo gồm 2 cột ["time", "prediction"]
-        results = []
-
-        history = history.copy()
-
-        current_time = pd.to_datetime(
-            start_time
-        )
-
-        feature_builder = FeatureBuilder()
-
-        for _ in range(steps):
-            features = (
-                feature_builder
-                .build_features(
-                    time_str=current_time,
-                    history=history
-                )
-            )
-
-            pred = self.predict_new(
-                model,
-                features
-            )
-
-            results.append({
-                "time": current_time,
-                "prediction": float(pred)
-            })
-
-            history.append(pred)
-
-            current_time += pd.Timedelta(
-                hours=1
-            )
-
-        return pd.DataFrame(
-            results
-        )
-
-    # ==================================================
-    # PREDICT CSV
-    # ==================================================
-    def predict_from_csv(
-        self,
-        model,      # Input 1: mô hình Ridge đã huấn luyện
-        csv_file,   # Input 2: đường dẫn hoặc đối tượng file CSV đầu vào ('time', 'value')
-        steps=24    # Input 3: số giờ tương lai cần dự báo (mặc định 24)
-    ):
-        # Input :
-        #   - model (Ridge)            : Mô hình Ridge đã train
-        #   - csv_file (str | file)    : File CSV lịch sử của người dùng (cột time, value)
-        #   - steps (int)              : Số bước thời gian (giờ) cần dự báo (mặc định 24)
-        # Output:
-        #   - forecast_df (pd.DataFrame): Bảng kết quả dự báo gồm 2 cột ["time", "prediction"]
-        df = pd.read_csv(
-            csv_file,
-            parse_dates=["time"]
-        )
-
-        df = df.sort_values(
-            "time"
-        )
-
-        history = (
-            df["value"]
-            .tolist()
-        )
-
-        if len(history) < 168:
-            raise ValueError(
-                "Need at least 168 rows"
-            )
-
-        start_time = (
-            df["time"].iloc[-1]
-            + pd.Timedelta(hours=1)
-        )
-
-        forecast_df = (
-            self.forecast_future(
-                model=model,
-                history=history,
-                start_time=start_time,
-                steps=steps
-            )
-        )
-
-        return forecast_df
-
-
 # ==== V4: SCALE-FREE LIGHTGBM (khuyến nghị) ====
 # Dự đoán tỷ lệ y / scale (scale = trung bình 168h trước đó của chính khách hàng) rồi nhân lại scale
 # => không bị chi phối bởi khách hàng lớn (MT_362 ~48.000 kWh), không cần log1p / clip lag.
@@ -1206,14 +797,23 @@ def regression_metrics(y, p):
 
 
 class LightGBMTrainerV4:
-    def __init__(self, data_dir="backend/dataset/processed_v4", log_dir="backend/logs",
-                 params=None, weight_power=0.5, num_boost_round=5000, early_stopping=100):
+    def __init__(
+        self,
+        data_dir="backend/dataset/processed_v4",
+        log_dir="backend/logs",
+        params=None,
+        weight_power=0.5,
+        num_boost_round=1000,
+    ):
+        self.data_dir = data_dir
+        self.params = {**_V4_PARAMS, **(params or {})}
+        self.weight_power = weight_power
+        self.num_boost_round = num_boost_round
         # data_dir: thư mục do Preprocessor.run_pipeline() tạo ra (.npy, đọc bằng mmap -> không tốn RAM)
         self.data_dir = data_dir
         self.params = {**_V4_PARAMS, **(params or {})}
         self.weight_power = weight_power          # trọng số mẫu = scale ** power (0.5: cân bằng khách lớn/nhỏ)
         self.num_boost_round = num_boost_round
-        self.early_stopping = early_stopping
         self.log = _Tee(os.path.join(log_dir, f"train_v4_{datetime.now():%Y%m%d_%H%M%S}.log"))
         info = json.load(open(os.path.join(data_dir, "preprocessing_metadata.json"), encoding="utf-8"))
         self.features = info["features"]
@@ -1231,7 +831,7 @@ class LightGBMTrainerV4:
         w /= w.mean()
         path = os.path.join(self.data_dir, f"{name}_p{self.weight_power}.bin")
         if cache and os.path.exists(path):
-            return lgb.Dataset(path)
+            return lgb.Dataset(path, reference=reference)
         ds = lgb.Dataset(np.asarray(X), label=(y / s).astype("float32"), weight=w,
                          feature_name=self.features, reference=reference, free_raw_data=True)
         ds.construct()
@@ -1247,77 +847,150 @@ class LightGBMTrainerV4:
             out[i:i + step] = booster.predict(np.asarray(X[i:i + step]), num_iteration=num_iteration)
         return y, np.maximum(out * s, 0), c
 
-    def train_model(self, save_name="lightgbm_v4", model_dir="backend/models", refit_on_valid=True):
+    def _fit(self, params, dtr, dva, label):
+        t0 = time.time()
+
+        b = lgb.train(
+            params=params,
+            train_set=dtr,
+            num_boost_round=self.num_boost_round,
+            valid_sets=[dva],
+            valid_names=["valid"],
+            callbacks=[
+                lgb.log_evaluation(period=100)
+            ]
+        )
+
+        self.log(
+            f"[{label}] completed {self.num_boost_round} iterations | "
+            f"time={time.time() - t0:.0f}s"
+        )
+
+        return b
+
+    def train_model(self, save_name="lightgbm_v4", model_dir="backend/models", band=(0.1, 0.9)):
+        # Huấn luyện 3 booster: trung bình (dự báo chính) + phân vị 10% & 90% (dải dự báo 80%)
         log = self.log
         log("Params:", json.dumps(self.params), "| weight_power:", self.weight_power)
         t0 = time.time()
         dtr = self._dataset("train")
         dva = self._dataset("valid", reference=dtr)
-        log(f"Datasets ready in {time.time() - t0:.1f}s | train rows={dtr.num_data():,} valid rows={dva.num_data():,}")
-        ev = {}
-        booster = lgb.train(
-            self.params, dtr, self.num_boost_round, valid_sets=[dva], valid_names=["valid"],
-            callbacks=[lgb.log_evaluation(100), lgb.early_stopping(self.early_stopping),
-                       lgb.record_evaluation(ev)],
+        
+        # Không construct thủ công ở đây.
+        # LightGBM sẽ tự construct khi bắt đầu training.
+        
+        train_rows = len(self._load("train")[1])
+        valid_rows = len(self._load("valid")[1])
+        
+        log(
+            f"Datasets ready in {time.time() - t0:.1f}s | "
+            f"train rows={train_rows:,} "
+            f"valid rows={valid_rows:,}"
         )
-        best = booster.best_iteration
-        log(f"Best iteration: {best} | train time {time.time() - t0:.0f}s")
 
-        y, p, c = self.predict_kwh(booster, "test", best)
-        evaluate = regression_metrics(y, p)
-        log("=== TEST (2014) metrics, kWh ===", json.dumps(evaluate))
-        per = pd.DataFrame({"c": c, "y": y, "p": p}).groupby("c").apply(
-            lambda g: pd.Series({"wape": np.abs(g.y - g.p).sum() / max(g.y.sum(), 1e-9) * 100, "mean": g.y.mean()}))
+        mean_m = self._fit(self.params, dtr, dva, "mean")
+        lo_m = self._fit({**self.params, "objective": "quantile", "alpha": band[0], "metric": "quantile"}, dtr, dva, "q10")
+        hi_m = self._fit({**self.params, "objective": "quantile", "alpha": band[1], "metric": "quantile"}, dtr, dva, "q90")
+
+        # --- đánh giá train / valid / test để kiểm tra overfit ---
+        result = {}
+        for name in ("train", "valid", "test"):
+            y, p, c = self.predict_kwh(mean_m, name, mean_m.best_iteration)
+            _, lo, _ = self.predict_kwh(lo_m, name, lo_m.best_iteration)
+            _, hi, _ = self.predict_kwh(hi_m, name, hi_m.best_iteration)
+            lo, hi = np.minimum(lo, p), np.maximum(hi, p)
+            m = regression_metrics(y, p)
+            m["coverage_80"] = float(((y >= lo) & (y <= hi)).mean() * 100)
+            m["band_width_pct"] = float((hi - lo).sum() / max(y.sum(), 1e-9) * 100)
+            result[name] = m
+            log(f"=== {name.upper()} ===", json.dumps(m))
+            if name == "test":
+                ty, tp, tc = y, p, c
+        gap = result["test"]["wape"] - result["train"]["wape"]
+        log(f"Overfit check: WAPE train {result['train']['wape']:.2f}% | valid {result['valid']['wape']:.2f}% | "
+            f"test {result['test']['wape']:.2f}% (test-train gap {gap:+.2f} điểm %)")
+
+        per = pd.DataFrame({"c": tc, "ae": np.abs(ty - tp), "y": ty}).groupby("c")[["ae", "y"]].sum()
+        per["wape"] = per.ae / per.y.clip(lower=1e-9) * 100
         per.index = [self.clients[i] for i in per.index]
         log(f"Per-client WAPE%: median={per.wape.median():.2f} p90={per.wape.quantile(.9):.2f} max={per.wape.max():.2f}")
-        log("Worst 5 clients:\n" + per.sort_values("wape").tail(5).to_string())
-        imp = pd.DataFrame({"feature": self.features, "gain": booster.feature_importance("gain")})
+        imp = pd.DataFrame({"feature": self.features, "gain": mean_m.feature_importance("gain")})
         log("Feature importance (gain):\n" + imp.sort_values("gain", ascending=False).to_string(index=False))
 
-        final = booster
-        if refit_on_valid:
-            # Huấn luyện lại trên train+valid (số vòng = best*1.1) để dùng dữ liệu gần thời điểm test nhất
-            Xt, yt, st, _ = self._load("train"); Xv, yv, sv, _ = self._load("valid")
-            X = np.vstack([np.asarray(Xt), np.asarray(Xv)])
-            ratio = np.concatenate([yt / st, yv / sv]).astype("float32")
-            w = np.power(np.concatenate([st, sv]), self.weight_power).astype("float32"); w /= w.mean()
-            full = lgb.Dataset(X, label=ratio, weight=w, feature_name=self.features)
-            refit = lgb.train(self.params, full, int(best * 1.1))
-            y2, p2, _ = self.predict_kwh(refit, "test")
-            m2 = regression_metrics(y2, p2)
-            log("=== TEST metrics after refit on train+valid ===", json.dumps(m2))
-            if m2["rmse"] < evaluate["rmse"]:
-                final, evaluate = refit, {**m2, "refit": True}
-            del X, full
-
+        evaluate = {**result["test"], "train": result["train"], "valid": result["valid"], "horizon": "day-ahead (24h)"}
         os.makedirs(model_dir, exist_ok=True)
-        final.save_model(os.path.join(model_dir, f"{save_name}.txt"))
-        joblib.dump({"model": final, "evaluate": evaluate, "features": self.features, "kind": "ratio_v4"},
+        for tag, m in (("", mean_m), ("_lo", lo_m), ("_hi", hi_m)):
+            m.save_model(
+                os.path.join(model_dir, f"{save_name}{tag}.txt"),
+                num_iteration=self.num_boost_round
+            )
+        joblib.dump({"model": mean_m, "lo_model": lo_m, "hi_model": hi_m, "evaluate": evaluate,
+                     "features": self.features, "kind": "ratio_v4", "band": list(band)},
                     os.path.join(model_dir, f"{save_name}.pkl"))
-        log(f"Saved: {model_dir}/{save_name}.pkl (+ .txt)")
-        return final, evaluate
+        log(f"Saved: {model_dir}/{save_name}.pkl")
+        return mean_m, evaluate
 
 
-def forecast_v4(model, history, start_time, steps):
-    # model: Booster | LGBM; history: list kWh (>=168, giờ liên tiếp); trả DataFrame [time, prediction] (kWh)
-    from preprocessing_services.feature_engineering import build_row_features, FEATURE_COLUMNS
+
+def forecast_v4(bundle, history, start_time, steps):
+    # bundle: dict nạp từ lightgbm_v4.pkl
+    # history: list kWh (>=168 giờ liên tiếp)
+    # Trả DataFrame [time, value, lo, hi] (kWh)
+
+    from preprocessing_services.feature_engineering import (
+        build_row_features,
+        FEATURE_COLUMNS
+    )
+
+    mean_m = bundle["model"]
+    lo_m = bundle["lo_model"]
+    hi_m = bundle["hi_model"]
+
     history = list(history)
     t = pd.to_datetime(start_time)
     rows = []
-    for _ in range(steps):
+
+    for k in range(steps):
         f, scale = build_row_features(history, t)
-        pred = float(model.predict(np.array([[f[k] for k in FEATURE_COLUMNS]], dtype="float32"))[0]) * scale
-        pred = max(pred, 0.0)
-        rows.append({"time": t, "prediction": pred})
-        history.append(pred)
+
+        x = np.array(
+            [[f[c] for c in FEATURE_COLUMNS]],
+            dtype="float32"
+        )
+
+        # Không truyền best_iteration:
+        # LightGBM sử dụng toàn bộ cây đã train.
+        v = max(float(mean_m.predict(x)[0]) * scale, 0.0)
+
+        lo = float(lo_m.predict(x)[0]) * scale
+        hi = float(hi_m.predict(x)[0]) * scale
+
+        # Nới khoảng dự báo theo số ngày dự báo đệ quy
+        widen = 1.0 + 0.15 * (k // 24)
+
+        lo = max(min(v - (v - lo) * widen, v), 0.0)
+        hi = max(v + (hi - v) * widen, v)
+
+        rows.append({
+            "time": t,
+            "value": v,
+            "lo": lo,
+            "hi": hi
+        })
+
+        # Đưa giá trị dự báo vào history cho bước tiếp theo
+        history.append(v)
+
         t += pd.Timedelta(hours=1)
+
     return pd.DataFrame(rows)
+
 
 
 if __name__ == "__main__":
     from preprocessing_services.preprocessor import Preprocessor
     # Bước 1: tiền xử lý (bỏ qua nếu đã có cache: xoá thư mục processed_v4 để chạy lại)
-    if not os.path.exists("backend/dataset/processed_v4/preprocessing_metadata.json"):
+    if not os.path.exists("backend/dataset/processed_v4/preprocessing_metadata.json") and "--rebuild" not in sys.argv:
         Preprocessor("backend/dataset/hourly_electricity_2013_2014.csv").run_pipeline("backend/dataset/processed_v4")
     # Bước 2: train LightGBM scale-free
     LightGBMTrainerV4().train_model()

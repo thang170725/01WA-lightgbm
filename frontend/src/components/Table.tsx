@@ -1,15 +1,12 @@
 "use client";
 
-type DataPoint = {
-    time: string;
-    value: number;
-};
+import type { ForecastPoint } from "@/routes/UploadApi";
 
 function formatTime(iso: string) {
     return iso.replace("T", " ").slice(0, 19);
 }
 
-export default function Table({ data }: { data: DataPoint[] }) {
+export default function Table({ data }: { data: ForecastPoint[] }) {
     return (
         <div className="flex max-h-[min(520px,70vh)] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-[0_4px_24px_-4px_rgba(15,23,42,0.08)]">
             <div className="border-b border-slate-100 bg-linear-to-r from-slate-50 to-teal-50/40 px-5 py-4">
@@ -17,16 +14,18 @@ export default function Table({ data }: { data: DataPoint[] }) {
                     Hourly values
                 </h2>
                 <p className="mt-1 text-xs text-slate-500">
-                    Scroll for all predictions
+                    Prediction with 80% band (low – high)
                 </p>
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto">
-                <table className="w-full min-w-[260px] border-collapse text-sm">
+                <table className="w-full min-w-[320px] border-collapse text-sm">
                     <thead className="sticky top-0 z-10 bg-white/95 shadow-[0_1px_0_0_rgb(226_232_240)] backdrop-blur-sm">
                         <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                             <th className="px-5 py-3 pl-5">Time</th>
-                            <th className="px-5 py-3 text-right">kW (pred.)</th>
+                            <th className="px-3 py-3 text-right">Low</th>
+                            <th className="px-3 py-3 text-right">kW (pred.)</th>
+                            <th className="px-5 py-3 text-right">High</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -38,8 +37,14 @@ export default function Table({ data }: { data: DataPoint[] }) {
                                 <td className="whitespace-nowrap px-5 py-2.5 font-mono text-xs text-slate-700">
                                     {formatTime(row.time)}
                                 </td>
-                                <td className="px-5 py-2.5 text-right font-mono text-sm font-medium tabular-nums text-slate-900">
-                                    {row.value.toFixed(4)}
+                                <td className="px-3 py-2.5 text-right font-mono text-xs tabular-nums text-slate-500">
+                                    {row.lo.toFixed(2)}
+                                </td>
+                                <td className="px-3 py-2.5 text-right font-mono text-sm font-medium tabular-nums text-slate-900">
+                                    {row.value.toFixed(2)}
+                                </td>
+                                <td className="px-5 py-2.5 text-right font-mono text-xs tabular-nums text-slate-500">
+                                    {row.hi.toFixed(2)}
                                 </td>
                             </tr>
                         ))}
