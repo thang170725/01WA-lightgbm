@@ -932,29 +932,73 @@ class LightGBMTrainerV4:
 
 
 
+def _build_direct_v4_features(history, t, feature_cols):
+    h = np.asarray(history[-168:], dtype="float64")
+    dow = int(t.dayofweek)
+    hour_float = t.hour + t.minute / 60.0 + t.second / 3600.0
+    feat_map = {
+        "day_of_week": dow,
+        "is_weekend": int(dow >= 5),
+        "hour_sin": float(np.sin(2.0 * np.pi * hour_float / 24.0)),
+        "hour_cos": float(np.cos(2.0 * np.pi * hour_float / 24.0)),
+        "lag_24h": float(h[-24]),
+        "lag_48h": float(h[-48]),
+        "lag_72h": float(h[-72]),
+        "lag_7d": float(h[-168]),
+        "rolling_mean_24h": float(h[-24:].mean()),
+        "rolling_mean_7d": float(h.mean()),
+        "rolling_std_24h": float(h[-24:].std(ddof=1)),
+    }
+    return np.array([[feat_map[c] for c in feature_cols]], dtype="float32")
+
+
 def forecast_v4(bundle, history, start_time, steps):
     # bundle: dict nạp từ lightgbm_v4.pkl
     # history: list kWh (>=168 giờ liên tiếp)
     # Trả DataFrame [time, value, lo, hi] (kWh)
 
-    from preprocessing_services.feature_engineering import (
-        build_row_features,
-        FEATURE_COLUMNS
-    )
-
     mean_m = bundle["model"]
     lo_m = bundle["lo_model"]
     hi_m = bundle["hi_model"]
+    kind = bundle.get("kind", "ratio_v4")
+    feature_cols = bundle.get("features")
 
     history = list(history)
     t = pd.to_datetime(start_time)
     rows = []
 
+    if kind == "direct_v4":
+        for k in range(steps):
+            x = _build_direct_v4_features(history, t, feature_cols)
+            v = max(float(mean_m.predict(x)[0]), 0.0)
+            lo = float(lo_m.predict(x)[0])
+            hi = float(hi_m.predict(x)[0])
+
+            widen = 1.0 + 0.15 * (k // 24)
+            lo = max(min(v - (v - lo) * widen, v), 0.0)
+            hi = max(v + (hi - v) * widen, v)
+
+            rows.append({
+                "time": t,
+                "value": v,
+                "lo": lo,
+                "hi": hi
+            })
+            history.append(v)
+            t += pd.Timedelta(hours=1)
+        return pd.DataFrame(rows)
+
+    from preprocessing_services.feature_engineering import (
+        build_row_features,
+        FEATURE_COLUMNS
+    )
+    cols = feature_cols or FEATURE_COLUMNS
+
     for k in range(steps):
         f, scale = build_row_features(history, t)
 
         x = np.array(
-            [[f[c] for c in FEATURE_COLUMNS]],
+            [[f[c] for c in cols]],
             dtype="float32"
         )
 

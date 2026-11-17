@@ -15,7 +15,7 @@ def debug_df(df, name):
 print("Loading raw data...")
 
 df = pd.read_csv(
-r"C:\TienTho\01WA-lightgbm\backend\dataset\LD2011_2014.txt",
+r"/home/thang/workspace/lightgbm/backend/dataset/LD2011_2014.txt",
 sep=';',
 decimal=',',
 parse_dates=[0]
@@ -27,7 +27,7 @@ debug_df(df, "RAW DATA")
 
 # ==== chọn 1 user ====
 
-user_col = df.columns[3]
+user_col = df.columns[316]
 
 user_df = df[["time", user_col]].rename(
 columns={user_col: "value_kw"}
@@ -91,7 +91,7 @@ debug_df(user_df, "FINAL DATA (8 DAYS)")
 
 # ==== save ====
 
-output_path = "backend/dataset/user_data_3.csv"
+output_path = "/home/thang/workspace/lightgbm/v0_0_1/data/0_0_1_0/user_data_316.csv"
 
 user_df.to_csv(output_path, index=False)
 

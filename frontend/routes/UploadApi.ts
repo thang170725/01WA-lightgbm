@@ -6,10 +6,28 @@ export const FORECAST_HOURS = 168;
 // value = dự báo trung bình; lo / hi = dải dự báo 80% (phân vị 10% - 90%)
 export type ForecastPoint = { time: string; value: number; lo: number; hi: number };
 
+// Điểm đối chiếu giữa dự đoán AI (C) và giá trị thực tế (B) sau khi cắt lịch sử (A)
+export type ComparisonPoint = {
+    time: string;
+    actual: number;
+    predicted: number;
+    lo: number;
+    hi: number;
+};
+
+export type ComparisonMetrics = {
+    mae: number;
+    rmse: number;
+    wape: number;
+    mape: number;
+    hours: number;
+    history_hours: number;
+};
+
 export type EvaluateMetrics = {
     mae: number;
     relative_mae?: number;
-    mape: number;
+    mape?: number;
     rmse: number;
     r2: number;
     wape?: number;
@@ -23,6 +41,8 @@ export type EvaluateMetrics = {
 
 export type PredictResponse = {
     result: ForecastPoint[];
+    comparison?: ComparisonPoint[];
+    comparison_metrics?: ComparisonMetrics | null;
     evaluate: EvaluateMetrics;
     band?: string;
     error?: string;

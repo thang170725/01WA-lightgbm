@@ -858,14 +858,14 @@ class VisualDatasetTXTV1:
 # - Backend không có màn hình nên dùng Agg (đã set ở đầu file)
 # ===========================================================================
 if __name__ == "__main__":
-    SAVE_PATH = "dataset/images"
+    SAVE_PATH = "dataset/images1"
 
     print("=" * 60)
     print("  ĐANG TẢI DATASET... (file ~680MB, mất 1-2 phút)")
     print("=" * 60)
 
     # Khởi tạo class EDA với đường dẫn tới dataset gốc
-    visual = VisualDatasetTXTV1(dataset_path="dataset/LD2011_2014.txt")
+    visual = VisualDatasetTXTV1(dataset_path="/home/thang/workspace/lightgbm/backend/dataset/hourly_electricity_2013_2014.csv")
     print(f"  ✓ Đã tải: {visual.rows} dòng, {len(visual.columns)-1} users\n")
 
     # --- 1. Line plot: biến thiên điện năng từng user ---

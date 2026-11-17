@@ -6,6 +6,7 @@ import Chart from "@/src/components/Chart";
 import Table from "@/src/components/Table";
 import DailyChart from "@/src/components/DailyChart";
 import DailyTable from "@/src/components/DailyTable";
+import ComparisonChart from "@/src/components/ComparisonChart";
 import Metrics from "@/src/components/Metrics";
 import { toDailyForecast } from "@/src/lib/daily";
 import type { PredictResponse } from "@/routes/UploadApi";
@@ -107,6 +108,11 @@ export default function Home() {
                                 )}
                             </aside>
                         </div>
+
+                        <ComparisonChart
+                            data={prediction.comparison ?? []}
+                            historyHours={prediction.comparison_metrics?.history_hours ?? 168}
+                        />
                     </div>
                 ) : (
                     <div className="rounded-2xl border border-dashed border-slate-300/80 bg-white/60 px-6 py-12 text-center backdrop-blur-sm">

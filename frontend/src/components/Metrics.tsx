@@ -26,11 +26,15 @@ export default function Metrics({ evaluate }: { evaluate: EvaluateMetrics }) {
                   },
               ]
             : []),
-        {
-            title: "MAPE",
-            subtitle: "Mean abs. % error",
-            value: `${evaluate.mape.toFixed(2)}%`,
-        },
+        ...(evaluate.mape != null
+            ? [
+                  {
+                      title: "MAPE",
+                      subtitle: "Mean abs. % error",
+                      value: `${evaluate.mape.toFixed(2)}%`,
+                  },
+              ]
+            : []),
         {
             title: "RMSE",
             subtitle: "Root mean squared",

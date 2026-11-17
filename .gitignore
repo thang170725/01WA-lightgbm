@@ -53,3 +53,6 @@ next-env.d.ts
 
 # data
 results/
+v0_0_1/data/
+v0_0_1/result/
+dataset/
