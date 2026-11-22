@@ -477,13 +477,13 @@ class LightGBMTrainerV4:
 if __name__ == "__main__":
 
     trainer = LightGBMTrainerV4(
-        train_path="/home/thang/workspace/lightgbm/v0_0_1/data/0_0_1_0/train_ready.csv",
-        valid_path="/home/thang/workspace/lightgbm/v0_0_1/data/0_0_1_0/valid_ready.csv",
-        test_path="/home/thang/workspace/lightgbm/v0_0_1/data/0_0_1_0/test_ready.csv",
+        train_path="/home/thang/workspace/lightgbm/v0_0_1/data/0_0_1_1/train_test_valid_high/train_ready.csv",
+        valid_path="/home/thang/workspace/lightgbm/v0_0_1/data/0_0_1_1/train_test_valid_high/valid_ready.csv",
+        test_path="/home/thang/workspace/lightgbm/v0_0_1/data/0_0_1_1/train_test_valid_high/test_ready.csv",
 
-        output_dir="/home/thang/workspace/lightgbm/v0_0_1/result/r0_0_1",
+        output_dir="/home/thang/workspace/lightgbm/v0_0_1/result/r0_0_1_1/r_high",
 
-        save_name="lightgbm_v4",
+        save_name="lightgbm_high",
 
         num_boost_round=500,
         early_stopping_rounds=100

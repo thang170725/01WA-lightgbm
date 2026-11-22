@@ -452,8 +452,8 @@ def main():
     frequency = None if args.frequency.lower() == "none" else args.frequency
 
     processor = ElectricityPreprocessor(
-        dataset_path=r"/home/thang/workspace/lightgbm/backend/dataset/household.csv",
-        output_dir=r"/home/thang/workspace/lightgbm/v0_0_1/data/0_0_1_0",
+        dataset_path=r"/home/thang/workspace/lightgbm/v0_0_1/data/0_0_1_1/load_high_enterprise.csv",
+        output_dir=r"/home/thang/workspace/lightgbm/v0_0_1/data/0_0_1_1/train_test_valid_high",
         train_end=args.train_end,
         valid_end=args.valid_end,
         expected_frequency=frequency,

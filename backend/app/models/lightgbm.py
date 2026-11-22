@@ -968,11 +968,14 @@ def forecast_v4(bundle, history, start_time, steps):
     rows = []
 
     if kind == "direct_v4":
+        mean_iter = getattr(mean_m, "best_iteration", None) or None
+        lo_iter = getattr(lo_m, "best_iteration", None) or None
+        hi_iter = getattr(hi_m, "best_iteration", None) or None
         for k in range(steps):
             x = _build_direct_v4_features(history, t, feature_cols)
-            v = max(float(mean_m.predict(x)[0]), 0.0)
-            lo = float(lo_m.predict(x)[0])
-            hi = float(hi_m.predict(x)[0])
+            v = max(float(mean_m.predict(x, num_iteration=mean_iter)[0]), 0.0)
+            lo = float(lo_m.predict(x, num_iteration=lo_iter)[0])
+            hi = float(hi_m.predict(x, num_iteration=hi_iter)[0])
 
             widen = 1.0 + 0.15 * (k // 24)
             lo = max(min(v - (v - lo) * widen, v), 0.0)

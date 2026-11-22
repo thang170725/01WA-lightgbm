@@ -1,11 +1,17 @@
-INFO:     Started server process [25210]
+INFO:     Started server process [15325]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
 
-Loading model from: /home/thang/workspace/lightgbm/v0_0_1/result/r0_0_1/models/lightgbm_v4.pkl
-INFO:     127.0.0.1:43144 - "POST /predict_lightgbm?steps=168 HTTP/1.1" 200 OK
+Loading model from: /home/thang/workspace/lightgbm/v0_0_1/result/r0_0_1_1/r_low/models/lightgbm_low.pkl
+
+Loading model from: /home/thang/workspace/lightgbm/v0_0_1/result/r0_0_1_1/r_medium/models/lightgbm_medium.pkl
+
+Loading model from: /home/thang/workspace/lightgbm/v0_0_1/result/r0_0_1_1/r_high/models/lightgbm_high.pkl
+INFO:     127.0.0.1:45506 - "POST /predict_lightgbm?tier=low&steps=24 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38632 - "POST /predict_lightgbm?tier=medium&steps=24 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49258 - "POST /predict_lightgbm?tier=high&steps=24 HTTP/1.1" 200 OK
 INFO:     Shutting down
 INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
-INFO:     Finished server process [25210]
+INFO:     Finished server process [15325]

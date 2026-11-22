@@ -20,7 +20,12 @@ FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 
 PY=".venv/bin/python"
 
-MODEL="/home/thang/workspace/lightgbm/v0_0_1/result/r0_0_1/models/lightgbm_v4.pkl"
+MODEL_BASE="/home/thang/workspace/lightgbm/v0_0_1/result/r0_0_1_1"
+MODELS=(
+    "$MODEL_BASE/r_low/models/lightgbm_low.pkl"
+    "$MODEL_BASE/r_medium/models/lightgbm_medium.pkl"
+    "$MODEL_BASE/r_high/models/lightgbm_high.pkl"
+)
 
 LOG_DIR="backend/logs"
 
@@ -41,11 +46,13 @@ if [ ! -d "frontend/node_modules" ]; then
     exit 1
 fi
 
-if [ ! -f "$MODEL" ]; then
-    echo "[ERROR] Không tìm thấy model:"
-    echo "$MODEL"
-    exit 1
-fi
+for m in "${MODELS[@]}"; do
+    if [ ! -f "$m" ]; then
+        echo "[ERROR] Không tìm thấy model:"
+        echo "$m"
+        exit 1
+    fi
+done
 
 # ==============================
 # PROCESS MANAGEMENT
@@ -108,7 +115,7 @@ echo " SYSTEM STARTED"
 echo "======================================"
 echo "Backend  : http://localhost:${BACKEND_PORT}"
 echo "Frontend : http://localhost:${FRONTEND_PORT}"
-echo "Model    : $MODEL"
+echo "Models   : $MODEL_BASE (low, medium, high)"
 echo "Backend log  : $LOG_DIR/backend.log"
 echo "Frontend log : $LOG_DIR/frontend.log"
 echo "======================================"
